@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>FFBEWG Compact Core</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app" data-screen="home">
+    <div class="screen-shell">
+      <header class="top-hud">
+        <div class="hud-main">
+          <div class="hud-chip">🏅 R<span id="rankValue">12</span></div>
+          <div class="hud-chip">💰 <span id="goldValue">128,400</span></div>
+          <div class="hud-chip">💎 <span id="gemValue">1,240</span></div>
+          <div class="hud-chip">🎫 <span id="ticketValue">0</span></div>
+          <div class="hud-chip hud-chip--party-power">⚡ <span id="partyPowerValue">0</span></div>
+          <button class="menu-btn" type="button" aria-label="메뉴">☰</button>
+        </div>
+      </header>
+
+      <main class="screen-main">
+        <section class="party-stage" id="partyStage"></section>
+        <section class="content-entry" id="contentEntry"></section>
+      </main>
+    </div>
+
+    <nav class="bottom-nav" aria-label="하단 메뉴">
+      <button class="nav-item active" data-screen="home" type="button">
+        <span class="nav-icon">⌂</span>
+        <span class="nav-label">홈</span>
+      </button>
+      <button class="nav-item" data-screen="units" type="button">
+        <span class="nav-icon">⚔</span>
+        <span class="nav-label">유닛</span>
+      </button>
+      <button class="nav-item" data-screen="growth" type="button">
+        <span class="nav-icon">⬆</span>
+        <span class="nav-label">성장</span>
+      </button>
+      <button class="nav-item" data-screen="summon" type="button">
+        <span class="nav-icon">✦</span>
+        <span class="nav-label">소환</span>
+        <span class="nav-badge">3</span>
+      </button>
+      <button class="nav-item" data-screen="pvp" type="button">
+        <span class="nav-icon">🏆</span>
+        <span class="nav-label">PVP</span>
+      </button>
+    </nav>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
