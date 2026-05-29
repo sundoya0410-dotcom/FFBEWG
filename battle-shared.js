@@ -6,13 +6,8 @@ export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// 전투 배속 — 1.0 / 1.5 / 2.0
-export let battleSpeed = 1.0;
-export function setBattleSpeed(v) { battleSpeed = v; }
-export function getBattleSpeed() { return battleSpeed; }
-
 export function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, Math.round(ms / battleSpeed)));
+  return new Promise((resolve) => setTimeout(resolve, Math.round(ms)));
 }
 
 export function pickAlive(list) {

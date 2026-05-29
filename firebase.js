@@ -20,9 +20,30 @@ const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
+function cleanForFirestore(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => cleanForFirestore(item)).filter((item) => item !== undefined);
+  }
+  if (!value || typeof value !== 'object') {
+    return value === undefined ? undefined : value;
+  }
+  return Object.entries(value).reduce((acc, [key, item]) => {
+    if (item === undefined || typeof item === 'function') return acc;
+    const cleaned = cleanForFirestore(item);
+    if (cleaned !== undefined) acc[key] = cleaned;
+    return acc;
+  }, {});
+}
+
 // 구글 로그인
-export async function loginWithGoogle() {
+export async function loginWithGoogle(emailHint = '', forceSelect = false) {
   const provider = new GoogleAuthProvider();
+  const params = {};
+  if (emailHint) {
+    params.login_hint = emailHint;
+  }
+  if (forceSelect) params.prompt = 'select_account';
+  if (Object.keys(params).length) provider.setCustomParameters(params);
   const result = await signInWithPopup(auth, provider);
   return result.user;
 }
@@ -47,5 +68,5 @@ export async function loadUserData(uid) {
 // Firestore에 유저 데이터 저장
 export async function saveUserData(uid, data) {
   const ref = doc(db, 'users', uid);
-  await setDoc(ref, data, { merge: true });
+  await setDoc(ref, cleanForFirestore(data));
 }

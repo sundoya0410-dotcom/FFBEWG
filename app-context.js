@@ -5,6 +5,6 @@
 //   import { createContext } from './app-context.js';
 //   const ctx = createContext({ state, refs, save, syncHud, getBattleCore, setBattleCore });
 
-export function createContext({ state, refs, save, syncHud, getBattleCore, setBattleCore }) {
-  return { state, refs, save, syncHud, getBattleCore, setBattleCore };
+export function createContext({ state, refs, save, syncHud, getBattleCore, setBattleCore, refreshBattle }) {
+  return { state, refs, save, syncHud, getBattleCore, setBattleCore, refreshBattle };
 }

@@ -9,10 +9,95 @@ const ELEMENT_META = {
 };
 const ELEMENT_KEYS = Object.keys(ELEMENT_ADVANTAGE);
 
+const JOB_BATTLE_PROFILES = {
+  '전사': { attackKind: 'physical', powerMult: 0.084, statMult: 7.1, damageMult: 1.04, critBonus: 0.02 },
+  '모험가': { attackKind: 'physical', powerMult: 0.078, statMult: 6.6, damageMult: 0.98, critBonus: 0.03 },
+  '성기사': { attackKind: 'physical', powerMult: 0.074, statMult: 6.0, damageMult: 0.9, critBonus: 0.01 },
+  '암흑기사': { attackKind: 'physical', powerMult: 0.092, statMult: 7.9, damageMult: 1.18, critBonus: 0.04 },
+  '용기사': { attackKind: 'physical', powerMult: 0.088, statMult: 7.6, damageMult: 1.12, critBonus: 0.06 },
+  '몽크': { attackKind: 'physical', powerMult: 0.08, statMult: 7.3, damageMult: 1.0, critBonus: 0.05 },
+  '무사': { attackKind: 'physical', powerMult: 0.09, statMult: 7.8, damageMult: 1.14, critBonus: 0.08 },
+  '닌자': { attackKind: 'physical', powerMult: 0.082, statMult: 7.0, damageMult: 1.04, critBonus: 0.09 },
+  '도적': { attackKind: 'physical', powerMult: 0.074, statMult: 6.5, damageMult: 0.95, critBonus: 0.06 },
+  '기공사': { attackKind: 'physical', powerMult: 0.076, statMult: 6.6, damageMult: 0.98, critBonus: 0.03 },
+  '도박사': { attackKind: 'physical', powerMult: 0.076, statMult: 6.2, damageMult: 0.96, critBonus: 0.1 },
+  '백마도사': { attackKind: 'magical', powerMult: 0.062, statMult: 5.8, damageMult: 0.82, critBonus: 0.01 },
+  '흑마도사': { attackKind: 'magical', powerMult: 0.086, statMult: 8.2, damageMult: 1.13, critBonus: 0.03 },
+  '청마도사': { attackKind: 'magical', powerMult: 0.082, statMult: 7.5, damageMult: 1.04, critBonus: 0.04 },
+  '소환사': { attackKind: 'magical', powerMult: 0.084, statMult: 7.8, damageMult: 1.08, critBonus: 0.03 },
+  '마도전사': { attackKind: 'hybrid', powerMult: 0.084, statMult: 7.4, damageMult: 1.08, critBonus: 0.04 },
+  '룬나이트': { attackKind: 'hybrid', powerMult: 0.078, statMult: 6.9, damageMult: 0.98, critBonus: 0.03 },
+  '학자': { attackKind: 'magical', powerMult: 0.07, statMult: 6.4, damageMult: 0.9, critBonus: 0.02 },
+  '양파검사': { attackKind: 'hybrid', powerMult: 0.086, statMult: 7.6, damageMult: 1.1, critBonus: 0.05 },
+};
+
+const DEFAULT_JOB_PROFILE = { attackKind: 'physical', powerMult: 0.074, statMult: 6.4, damageMult: 1, critBonus: 0.02 };
+
+const JOB_ACTION_LABELS = {
+  '전사': '돌파',
+  '모험가': '임기응변',
+  '성기사': '성역',
+  '암흑기사': '심연',
+  '용기사': '점프 어택',
+  '몽크': '기합',
+  '무사': '일섬',
+  '닌자': '그림자 베기',
+  '도적': '기습',
+  '기공사': '합기',
+  '도박사': '승부수',
+  '백마도사': '기도',
+  '흑마도사': '마법 폭발',
+  '청마도사': '청마법',
+  '소환사': '소환',
+  '마도전사': '마도검',
+  '룬나이트': '룬가드',
+  '학자': '전술 분석',
+  '양파검사': '만능전술',
+};
+
 export function attachBattleEffects(HomeBattleCore) {
   Object.assign(HomeBattleCore.prototype, {
 getRole(actor) {
-  return actor?.unit?.role || '';
+  return actor?.unit?.battleRole || actor?.unit?.role || '';
+},
+
+getJob(actor) {
+  return actor?.unit?.job || this.getRole(actor) || '';
+},
+
+getJobRoles(actor) {
+  const roles = actor?.unit?.jobRoles;
+  if (Array.isArray(roles) && roles.length) return roles;
+  return [this.getRole(actor)].filter(Boolean);
+},
+
+hasJobRole(actor, role) {
+  return this.getJobRoles(actor).includes(role);
+},
+
+getJobProfile(actor) {
+  return JOB_BATTLE_PROFILES[this.getJob(actor)] || DEFAULT_JOB_PROFILE;
+},
+
+getJobActionLabel(actor, { isLimit = false, support = '' } = {}) {
+  const job = this.getJob(actor);
+  if (support === 'heal') return job === '소환사' ? '소환 치유' : JOB_ACTION_LABELS[job] || '회복';
+  if (support === 'buff') return job === '기공사' ? '합기' : job === '도박사' ? '승부수' : JOB_ACTION_LABELS[job] || '지원';
+  if (support === 'debuff') return job === '도적' ? '기습' : job === '닌자' ? '그림자 베기' : JOB_ACTION_LABELS[job] || '약화';
+  if (!isLimit) return JOB_ACTION_LABELS[job] || '공격';
+  return {
+    '무사': '필살 일섬',
+    '마도전사': '마도검 해방',
+    '소환사': '대소환',
+    '성기사': '성역 개방',
+    '용기사': '천공 점프',
+    '암흑기사': '심연 해방',
+    '기공사': '합기 난무',
+  }[job] || `${JOB_ACTION_LABELS[job] || '리미트'} LIMIT`;
+},
+
+getLimitThreshold(actor) {
+  return ['무사', '마도전사', '소환사', '성기사'].includes(this.getJob(actor)) ? 2 : 3;
 },
 
 normalizeElement(element) {
@@ -43,21 +128,23 @@ getElementMatchup(attacker, target) {
   }
 
   if (attackerElement === targetElement) {
-    return { multiplier: 0.9, label: '무승부', tag: `${ELEMENT_META[attackerElement]?.icon || ''}DRAW`, variant: 'same-el', attackerElement, targetElement };
+    return { multiplier: 0.9, label: '상쇄', tag: `${ELEMENT_META[attackerElement]?.icon || ''}상쇄`, variant: 'same-el', attackerElement, targetElement };
   }
   if (ELEMENT_ADVANTAGE[attackerElement] === targetElement) {
-    return { multiplier: 1.5, label: '우위', tag: `${ELEMENT_META[attackerElement]?.icon || ''}WIN`, variant: 'weak-el', attackerElement, targetElement };
+    return { multiplier: 1.5, label: '약점', tag: `${ELEMENT_META[attackerElement]?.icon || ''}약점!`, variant: 'weak-el', attackerElement, targetElement };
   }
   if (ELEMENT_ADVANTAGE[targetElement] === attackerElement) {
-    return { multiplier: 0.6, label: '열세', tag: `${ELEMENT_META[attackerElement]?.icon || ''}LOSE`, variant: 'resist-el', attackerElement, targetElement };
+    return { multiplier: 0.6, label: '내성', tag: `${ELEMENT_META[attackerElement]?.icon || ''}내성`, variant: 'resist-el', attackerElement, targetElement };
   }
   return { multiplier: 1, label: '', tag: '', variant: '', attackerElement, targetElement };
 },
 
 getAttackKind(actor) {
   if (actor?.attackType) return actor.attackType;
-  const role = this.getRole(actor);
-  return role === '마법 딜러' || role === '힐러' ? 'magical' : 'physical';
+  const profile = this.getJobProfile(actor);
+  if (profile.attackKind !== 'hybrid') return profile.attackKind;
+  const unit = actor?.unit || {};
+  return (Number(unit.mag) || 0) > (Number(unit.atk) || 0) ? 'magical' : 'physical';
 },
 
 getDefenseValue(attacker, target) {
@@ -87,6 +174,17 @@ getPreferredBuffTarget(source) {
     .sort((a, b) => (b.unit.power || 0) - (a.unit.power || 0))[0] || source;
 },
 
+getBuffRefreshTarget(source) {
+  const allies = pickAlive(this.allies);
+  const candidates = allies.filter((ally) => ally.id !== source.id);
+  const needingBuff = candidates
+    .filter((ally) => (ally.effects?.attackUp || 0) <= 0 || (ally.effects?.critUp || 0) <= 0)
+    .sort((a, b) => (b.unit.power || 0) - (a.unit.power || 0));
+  if (needingBuff.length) return needingBuff[0];
+  if (allies.length === 1 && ((source.effects?.attackUp || 0) <= 0 || (source.effects?.critUp || 0) <= 0)) return source;
+  return null;
+},
+
 applyHeal(target, amount, variant = 'heal') {
   if (!target || target.hp <= 0) return 0;
   const healed = Math.max(0, Math.min(target.maxHp - target.hp, amount));
@@ -101,7 +199,7 @@ applyHeal(target, amount, variant = 'heal') {
 applyBuff(target, kind, turns = 1, label = 'BUFF') {
   if (!target?.effects) return;
   target.effects[kind] = Math.max(target.effects[kind] || 0, turns);
-  const icons = { attackUp: '⚔️ ATK↑', critUp: '🎯 CRIT↑', guard: '🛡️ GUARD', taunt: '🔥 DRAW' };
+  const icons = { attackUp: '⚔️ ATK↑', critUp: '🎯 CRIT↑', guard: '🛡️ GUARD', taunt: '🔥 도발' };
   const display = icons[kind] || `✨ ${label}`;
   this.addFloater({ x: clamp(target.x + 1, 8, 92), y: clamp(target.y + 16, 10, 92), value: display, variant: 'buff' });
   this.syncCombatant(target);
@@ -131,15 +229,35 @@ decayEnemyTurnEffects() {
   });
 },
 
+getOffenseStat(actor) {
+  const unit = actor?.unit || {};
+  const kind = this.getAttackKind(actor);
+  if (this.getJob(actor) === '마도전사') {
+    return Math.max(0, (Number(unit.atk) || 0) + (Number(unit.mag) || 0));
+  }
+  if (this.getJobProfile(actor).attackKind === 'hybrid') {
+    return Math.max(0, Math.round(((Number(unit.atk) || 0) + (Number(unit.mag) || 0)) / 2));
+  }
+  return Math.max(0, Number(kind === 'magical' ? unit.mag : unit.atk) || 0);
+},
+
+getAllyAttackBaseDamage(actor) {
+  const profile = this.getJobProfile(actor);
+  const power = Math.max(0, Number(actor?.unit?.power) || 0);
+  const offense = this.getOffenseStat(actor);
+  return Math.max(1, Math.floor(power * profile.powerMult + offense * profile.statMult));
+},
+
 computeAttackMultiplier(actor, target, { isLimit = false, finisher = false } = {}) {
   let mult = 1;
-  const role = this.getRole(actor);
-  if (role === '물리 딜러') mult *= 1.12;
-  else if (role === '마법 딜러') mult *= 1.08;
-  else if (role === '탱커') mult *= 0.86;
-  else if (role === '디버퍼') mult *= 0.94;
-  else if (role === '힐러') mult *= 0.78;
-  else if (role === '버퍼') mult *= 0.82;
+  const job = this.getJob(actor);
+  mult *= this.getJobProfile(actor).damageMult;
+  if (job === '용기사' && isLimit) mult *= 1.1;
+  if (job === '무사' && finisher) mult *= 1.18;
+  if (job === '암흑기사' && target?.hp / target?.maxHp <= 0.5) mult *= 1.12;
+  if (job === '닌자' && target?.effects?.break) mult *= 1.1;
+  if (job === '도박사') mult *= Math.random() < 0.33 ? 1.24 : 0.94;
+  if (job === '양파검사' && actor.actionCount >= 2) mult *= 1.08;
   if (actor.effects?.attackUp) mult *= 1.24;
   if (target?.effects?.break) mult *= 1.22;
   mult *= this.getElementMatchup(actor, target).multiplier;
@@ -150,30 +268,37 @@ computeAttackMultiplier(actor, target, { isLimit = false, finisher = false } = {
 
 getCritBonus(actor, target) {
   let bonus = 0;
+  bonus += this.getJobProfile(actor).critBonus || 0;
+  const job = this.getJob(actor);
+  if (job === '도적' && target?.effects?.break) bonus += 0.06;
+  if (job === '무사' && target?.hp / target?.maxHp <= 0.35) bonus += 0.08;
+  if (job === '용기사') bonus += 0.03;
   if (actor.effects?.critUp) bonus += 0.16;
   if (target?.effects?.break) bonus += 0.08;
   return bonus;
 },
 
 addFloater({ x, y, value, crit = false, variant = '' }) {
-  // 같은 x 근처(±8%)에 살아있는 floater 수 세서 위로 쌓기
+  if (!this.dom.fxLayer) return;
   const now = performance.now();
   const nearby = this.floaters.filter(f => {
     const age = (now - f.createdAt) / f.ttl;
-    return age < 0.85 && Math.abs(f.x - x) < 8;
+    return age < 0.8 && Math.abs(f.x - x) < 8;
   });
-  const stackOffset = nearby.length * 10; // floater 1개당 10% 위로
+  const stackOffset = nearby.length * 7;
+  const sideOffset = nearby.length ? (nearby.length % 2 === 0 ? 1 : -1) * Math.ceil(nearby.length / 2) * 2.5 : 0;
+  const finalX = clamp(x + sideOffset, 5, 95);
   const finalY = clamp(y + stackOffset, 5, 92);
 
   const node = document.createElement('div');
   node.className = `floater${crit ? ' is-crit' : ''}${variant ? ` floater--${variant}` : ''}`;
   node.textContent = value;
-  node.style.left = `${x}%`;
+  node.style.left = `${finalX}%`;
   node.style.bottom = `${finalY}%`;
   this.dom.fxLayer.appendChild(node);
-  const ttl = variant === 'buff' || variant === 'debuff' || variant === 'heal' ? 1100 : 750;
+  const ttl = variant === 'buff' || variant === 'debuff' || variant === 'heal' ? 800 : 520;
   this.floaters.push({
-    node, x, y: finalY,
+    node, x: finalX, y: finalY,
     createdAt: now,
     ttl,
   });
@@ -372,8 +497,8 @@ updateFloaters(now) {
       return false;
     }
     // 초반 80% 유지, 후반 20% 페이드아웃
-    floater.node.style.opacity = String(progress < 0.75 ? 1 : 1 - (progress - 0.75) * 4);
-    floater.node.style.transform = `translate(-50%, ${-44 * progress}px)`;
+    floater.node.style.opacity = String(progress < 0.65 ? 1 : 1 - (progress - 0.65) / 0.35);
+    floater.node.style.transform = `translate(-50%, ${-58 * progress}px)`;
     return true;
   });
 }

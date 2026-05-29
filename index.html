@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>FFBEWG Compact Core</title>
+  <title>FFBEWG</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -11,11 +11,19 @@
     <div class="screen-shell">
       <header class="top-hud">
         <div class="hud-main">
+          <div class="hud-brand" aria-label="FFBEWG 로고">
+            <img src="./images/logos/logos-transparent.png" alt="FFBEWG" draggable="false" />
+          </div>
           <div class="hud-chip">🏅 R<span id="rankValue">12</span></div>
           <div class="hud-chip">💰 <span id="goldValue">128,400</span></div>
           <div class="hud-chip">💎 <span id="gemValue">1,240</span></div>
           <div class="hud-chip">🎫 <span id="ticketValue">0</span></div>
           <div class="hud-chip hud-chip--party-power">⚡ <span id="partyPowerValue">0</span></div>
+          <div class="save-status save-status--idle" id="saveStatus" aria-live="polite" title="서버 저장 상태">
+            <span class="save-status__dot"></span>
+            <span id="saveStatusText">저장 대기</span>
+          </div>
+          <button class="admin-menu-btn" id="adminMenuBtn" type="button" hidden>관리자</button>
           <button class="menu-btn" type="button" aria-label="메뉴">☰</button>
         </div>
       </header>
@@ -34,6 +42,10 @@
       <button class="nav-item" data-screen="units" type="button">
         <span class="nav-icon">⚔</span>
         <span class="nav-label">유닛</span>
+      </button>
+      <button class="nav-item" data-screen="collection" type="button">
+        <span class="nav-icon">◆</span>
+        <span class="nav-label">도감</span>
       </button>
       <button class="nav-item" data-screen="growth" type="button">
         <span class="nav-icon">⬆</span>
@@ -54,3 +66,4 @@
   <script type="module" src="./main.js"></script>
 </body>
 </html>
+ 

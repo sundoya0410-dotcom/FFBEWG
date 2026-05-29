@@ -1,17 +1,19 @@
 import {
   UNIT_RENDER_PROFILES,
-  getPartyUnits,
+  getEffectivePartyUnits,
   formatNumber,
+  normalizePartyFormation,
   resolveGround,
   resolveUnitSprite,
 } from './assets.js';
-import { clamp, lerp, wait, pickAlive, waitForGif, getBattleSpeed } from './battle-shared.js';
+import { clamp, lerp, wait, pickAlive, waitForGif } from './battle-shared.js';
 
 export function attachBattleFlow(HomeBattleCore) {
   Object.assign(HomeBattleCore.prototype, {
 ensureCombatants() {
-  const party = getPartyUnits(this.state);
+  const party = getEffectivePartyUnits(this.state);
   const formation = this.getAllyFormationSlots(party);
+  this.ensureBattleTracking();
   this.allies = party.map((unit, index) => ({
     id: unit.id,
     team: 'ally',
@@ -27,6 +29,8 @@ ensureCombatants() {
     homeY: formation[index].y,
     motion: null,
     actionCount: 0,
+    skillClock: 0,
+    skillCooldowns: {},
     lane: index,
     turnIndex: index,
     element: this.normalizeElement(unit.element),
@@ -34,6 +38,77 @@ ensureCombatants() {
     effects: { guard: 0, taunt: 0, attackUp: 0, critUp: 0 },
   }));
   this.spawnEncounter();
+},
+
+ensureBattleTracking() {
+  if (!this.state.home.earnedResources) {
+    this.state.home.earnedResources = { gold: 0, gems: 0, waves: 0, bosses: 0 };
+  }
+  if (!this.state.home.battleStats) this.state.home.battleStats = {};
+  const pendingGold = Math.max(0, Math.floor(Number(this.state.home.rewardGold) || 0));
+  if (pendingGold > 0) {
+    this.state.resources.gold += pendingGold;
+    this.state.home.earnedResources.gold = (this.state.home.earnedResources.gold || 0) + pendingGold;
+    this.state.home.rewardGold = 0;
+  }
+},
+
+recordResourceGain(kind, amount = 0) {
+  this.ensureBattleTracking();
+  const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+  this.state.home.earnedResources[kind] = (this.state.home.earnedResources[kind] || 0) + safeAmount;
+},
+
+recordUnitBattleStat(actor, key, amount = 1) {
+  if (!actor?.unit?.id) return;
+  this.ensureBattleTracking();
+  const stats = this.state.home.battleStats;
+  if (!stats[actor.unit.id]) {
+    stats[actor.unit.id] = {
+      name: actor.unit.name,
+      damage: 0,
+      healing: 0,
+      buffs: 0,
+      debuffs: 0,
+      kills: 0,
+      turns: 0,
+    };
+  }
+  stats[actor.unit.id].name = actor.unit.name;
+  stats[actor.unit.id][key] = (stats[actor.unit.id][key] || 0) + Math.max(0, Math.floor(Number(amount) || 0));
+},
+
+advanceSkillClock(actor) {
+  actor.skillClock = (actor.skillClock || 0) + 1;
+},
+
+canUseSkill(actor, skill) {
+  return (actor.skillCooldowns?.[skill] || 0) <= (actor.skillClock || 0);
+},
+
+setSkillCooldown(actor, skill, turns = 1) {
+  if (!actor.skillCooldowns) actor.skillCooldowns = {};
+  actor.skillCooldowns[skill] = (actor.skillClock || 0) + Math.max(1, turns);
+},
+
+activateOpeningTactics() {
+  const firstEnemy = pickAlive(this.enemies).sort((a, b) => Number(b.isBoss) - Number(a.isBoss) || b.maxHp - a.maxHp)[0] || null;
+  this.allies.forEach((ally) => {
+    const job = this.getJob(ally);
+    if (!ally.effects) ally.effects = {};
+    if (this.hasJobRole(ally, '탱커')) {
+      this.applyBuff(ally, 'guard', job === '성기사' || job === '룬나이트' ? 5 : 3, 'GUARD');
+      this.applyBuff(ally, 'taunt', job === '성기사' ? 4 : 2, '도발');
+    }
+    if (this.hasJobRole(ally, '버퍼')) {
+      const target = this.getPreferredBuffTarget(ally);
+      this.applyBuff(target, 'attackUp', 3, 'ATK↑');
+      this.applyBuff(target, 'critUp', job === '도박사' ? 4 : 3, 'CRIT↑');
+    }
+    if (this.hasJobRole(ally, '디버퍼') && firstEnemy) {
+      this.applyBreak(firstEnemy, job === '학자' || job === '청마도사' ? 3 : 2, 'BREAK');
+    }
+  });
 },
 
 getAllyFormationSlots(party) {
@@ -55,12 +130,19 @@ getAllyFormationSlots(party) {
     { x: 58, y: 3 },
   ];
 
-  const byFormation = {
-    back:        defaults[0],
-    'mid-back':  defaults[1],
-    mid:         defaults[2],
-    'mid-front': defaults[2],
-    front:       defaults[3],
+  const byRow = {
+    back: [
+      { x: 81, y: 38 },
+      { x: 74, y: 26 },
+      { x: 82, y: 14 },
+      { x: 76, y: 3 },
+    ],
+    front: [
+      { x: 64, y: 35 },
+      { x: 56, y: 23 },
+      { x: 67, y: 11 },
+      { x: 53, y: 1 },
+    ],
   };
 
   const byAsset = {
@@ -74,10 +156,16 @@ getAllyFormationSlots(party) {
     flare_witch: { x: 58, y: 20 },
   };
 
+  const formation = normalizePartyFormation(this.state.party?.formation);
   return party.map((unit, index) => {
     const profile = UNIT_RENDER_PROFILES[unit.assetKey] || {};
-    const slot = byAsset[unit.assetKey] || byFormation[profile.formation] || defaults[index] || defaults[defaults.length - 1];
-    return { x: slot.x, y: slot.y };
+    const slotIndex = this.state.party?.slots?.indexOf(unit.id) ?? index;
+    const row = formation[slotIndex] || 'back';
+    const slot = byRow[row]?.[slotIndex] || byRow[row]?.[index] || byAsset[unit.assetKey] || defaults[index] || defaults[defaults.length - 1];
+    return {
+      x: slot.x,
+      y: slot.y + (profile.shiftBattleY || 0),
+    };
   });
 },
 
@@ -160,6 +248,7 @@ spawnEncounter() {
   this.seed += 1;
   this.actorOrderIndex = 0;
   this.activeActorId = null;
+  this.activateOpeningTactics();
 },
 
 loop(now) {
@@ -197,7 +286,7 @@ moveActor(actor, toX, toY, duration, stateWhileMoving, stateOnEnd = null) {
       fromY: actor.y,
       toX,
       toY,
-      duration: duration / getBattleSpeed(),
+      duration: Math.max(1, duration * 0.5),
       startAt: performance.now(),
       resolve,
       stateOnEnd,
@@ -349,15 +438,17 @@ async runAllyTurn(actor) {
   const target = this.pickClosestTarget(actor, pickAlive(this.enemies));
   if (!target) return;
 
-  const role = this.getRole(actor);
-  const isLimitTurn = actor.actionCount >= 3;
+  const job = this.getJob(actor);
+  const isLimitTurn = actor.actionCount >= this.getLimitThreshold(actor);
   const moveType = actor.renderProfile?.moveType || 'melee';
+  this.advanceSkillClock(actor);
+  this.recordUnitBattleStat(actor, 'turns');
   await wait(100);
 
   if (isLimitTurn) {
-    actor.state = 'casting';
+    actor.state = 'attack';
     this.syncCombatant(actor);
-    await wait(200);
+    await wait(100);
     actor.state = 'limit';
     this.syncCombatant(actor);
     actor.limitStartTime = Date.now();
@@ -378,36 +469,49 @@ async runAllyTurn(actor) {
     // 컷씬은 백그라운드에서 재생 — 타격 루프와 동시 진행
   }
 
-  if (!isLimitTurn && role === '힐러') {
+  if (!isLimitTurn && this.hasJobRole(actor, '힐러')) {
     const healTarget = this.getLowestHpAlly();
-    if (healTarget && healTarget.hp < healTarget.maxHp * 0.92) {
-      actor.state = 'casting';
+    const healLine = job === '백마도사' ? 0.88 : job === '소환사' ? 0.66 : 0.74;
+    if (healTarget && healTarget.hp < healTarget.maxHp * healLine) {
+      actor.state = job === '백마도사' || job === '소환사' ? 'casting' : 'attack';
       this.syncCombatant(actor);
-      await waitForGif(actor, 300, 1200);
-      this.applyHeal(healTarget, Math.round(healTarget.maxHp * 0.16), 'heal');
+      await waitForGif(actor, 140, 520);
+      const healRate = job === '백마도사' ? 0.26 : job === '소환사' ? 0.18 : 0.2;
+      this.addFloater({ x: clamp(actor.x + 1, 8, 92), y: clamp(actor.y + 20, 10, 92), value: this.getJobActionLabel(actor, { support: 'heal' }), variant: 'heal' });
+      const healed = this.applyHeal(healTarget, Math.round(healTarget.maxHp * healRate), 'heal');
+      this.recordUnitBattleStat(actor, 'healing', healed);
       this.addArenaFlash({ color: 'ally', strength: 'soft', duration: 160 });
       actor.actionCount += 1;
-      actor.idleState = actor.actionCount >= 3 ? 'casting' : 'idle';
+      actor.idleState = 'idle';
       actor.state = actor.idleState;
       this.syncCombatant(actor);
-        await wait(120);
+      await wait(70);
       return;
     }
   }
 
-  if (!isLimitTurn && role === '버퍼') {
-    const buffTarget = this.getPreferredBuffTarget(actor);
-    actor.state = 'casting';
-    this.syncCombatant(actor);
-    await waitForGif(actor, 300, 1200);
-    this.applyBuff(buffTarget, 'attackUp', 1, 'ATK↑');
-    this.applyBuff(buffTarget, 'critUp', 1, 'CRIT↑');
-    actor.actionCount += 1;
-    actor.idleState = actor.actionCount >= 3 ? 'casting' : 'idle';
-    actor.state = actor.idleState;
-    this.syncCombatant(actor);
-    await wait(120);
-    return;
+  if (!isLimitTurn && this.hasJobRole(actor, '탱커') && this.canUseSkill(actor, 'stance')) {
+    const needsGuard = (actor.effects?.guard || 0) <= 0 || (actor.hp / actor.maxHp < 0.55 && job === '전사');
+    const needsTaunt = (actor.effects?.taunt || 0) <= 0 && (job === '성기사' || job === '전사' || job === '몽크' || job === '룬나이트');
+    if (needsGuard || needsTaunt) {
+      if (needsGuard) this.applyBuff(actor, 'guard', job === '성기사' || job === '룬나이트' ? 3 : 2, 'GUARD');
+      if (needsTaunt) this.applyBuff(actor, 'taunt', job === '성기사' ? 3 : 2, '도발');
+      this.setSkillCooldown(actor, 'stance', job === '성기사' ? 1 : 2);
+    }
+  }
+
+  if (!isLimitTurn && this.hasJobRole(actor, '버퍼') && this.canUseSkill(actor, 'buff')) {
+    const buffTarget = this.getBuffRefreshTarget(actor);
+    if (buffTarget) {
+      actor.state = job === '기공사' || job === '도박사' || job === '몽크' ? 'attack' : 'casting';
+      this.syncCombatant(actor);
+      await waitForGif(actor, 100, 360);
+      this.addFloater({ x: clamp(actor.x + 1, 8, 92), y: clamp(actor.y + 20, 10, 92), value: this.getJobActionLabel(actor, { support: 'buff' }), variant: 'buff' });
+      this.applyBuff(buffTarget, 'attackUp', job === '기공사' || job === '학자' ? 4 : 3, 'ATK↑');
+      this.applyBuff(buffTarget, 'critUp', job === '도박사' ? 4 : 3, 'CRIT↑');
+      this.recordUnitBattleStat(actor, 'buffs', 2);
+      this.setSkillCooldown(actor, 'buff', job === '백마도사' || job === '소환사' ? 2 : 1);
+    }
   }
 
   const contact = this.getAllyContact(actor, target, isLimitTurn);
@@ -416,14 +520,17 @@ async runAllyTurn(actor) {
   const recoilDuration = moveType === 'hover' ? 140 : moveType === 'ranged' || moveType === 'support' ? 120 : 150;
   const returnDuration = moveType === 'hover' ? 250 : moveType === 'skirmish' ? 280 : 330;
   await this.moveActor(actor, contact.x, contact.y, approachDuration, 'move', isLimitTurn ? 'limit' : 'attack');
-  await wait(isLimitTurn ? 60 : 80);
+  await wait(isLimitTurn ? 40 : 45);
 
   const hitCount = isLimitTurn ? 3 : 1;
-  const power = actor.unit?.power || 8000;
-  const roleMult = role === '물리 딜러' ? 0.18 : role === '마법 딜러' ? 0.17 : role === '디버퍼' ? 0.14 : role === '탱커' ? 0.13 : role === '힐러' ? 0.12 : role === '버퍼' ? 0.13 : 0.15;
-  const roleBaseDamage = Math.floor(power * roleMult);
+  const limitGifMs = isLimitTurn
+    ? Math.min(Math.max(await (actor.gifDurationPromise || Promise.resolve(actor.gifDuration || 0)) || 900, 500), 8000)
+    : 0;
+  const limitHitWait = isLimitTurn ? Math.max(90, Math.floor(limitGifMs / hitCount)) : 0;
+  let limitWaitSpent = 0;
+  const roleBaseDamage = this.getAllyAttackBaseDamage(actor);
   const totalDamage = isLimitTurn
-    ? Math.floor(power * (0.55 + Math.random() * 0.15))
+    ? Math.floor(roleBaseDamage * (3.05 + Math.random() * 0.45))
     : roleBaseDamage + Math.floor(Math.random() * Math.floor(roleBaseDamage * 0.2));
   const baseSlice = Math.floor(totalDamage / hitCount);
 
@@ -436,7 +543,10 @@ async runAllyTurn(actor) {
     const critRoll = this.rollCrit(actor, { isLimit: isLimitTurn, finisher, target });
     const elementRoll = this.getElementMatchup(actor, target);
     const dealt = Math.max(1, Math.round(baseSlice * this.computeAttackMultiplier(actor, target, { isLimit: isLimitTurn, finisher }) * critRoll.multiplier));
+    const wasAlive = target.hp > 0;
     target.hp = Math.max(0, target.hp - dealt);
+    this.recordUnitBattleStat(actor, 'damage', dealt);
+    if (wasAlive && target.hp <= 0) this.recordUnitBattleStat(actor, 'kills');
 
     // 슬래시 스트릭: 리미트는 3회 모두, 일반도 크리·보스타격 시 재생
     const showSlash = isLimitTurn || critRoll.crit || target.isBoss;
@@ -457,12 +567,13 @@ async runAllyTurn(actor) {
 
     this.flashTarget(target, target.isBoss ? 420 : isLimitTurn ? 340 : critRoll.crit ? 260 : 200);
     this.reactTargetHit(target, { sourceTeam: actor.team, heavy: isLimitTurn || critRoll.crit, boss: Boolean(target.isBoss) });
+    const actionLabel = this.getJobActionLabel(actor, { isLimit: isLimitTurn });
     const dmgEmoji = isLimitTurn ? '💫 ' : critRoll.crit ? '⚡ ' : '';
     const elementTag = elementRoll.tag ? `${elementRoll.tag} ` : '';
     this.addFloater({
       x: burstX,
       y: clamp(burstY + 2, 10, 88),
-      value: `${dmgEmoji}${elementTag}${formatNumber(dealt)}`,
+      value: `${dmgEmoji}${actionLabel} ${elementTag}${formatNumber(dealt)}`,
       crit: critRoll.crit,
       variant: isLimitTurn ? 'limit-dmg' : elementRoll.variant,
     });
@@ -484,9 +595,15 @@ async runAllyTurn(actor) {
       this._comboCount = 0;
     }
     if (isLimitTurn && !this._cutsceneOn) {
-      await wait(finisher ? 220 : 140);
+      await wait(limitHitWait);
+      limitWaitSpent += limitHitWait;
     } else {
-      await waitForGif(actor, isLimitTurn ? (finisher ? 500 : 300) : 200, isLimitTurn ? 8000 : 3000);
+      if (isLimitTurn) {
+        await wait(limitHitWait);
+        limitWaitSpent += limitHitWait;
+      } else {
+        await waitForGif(actor, 120, 900);
+      }
     }
     if (target.hp <= 0) {
       this.spawnEnemyDeathParticles(target);
@@ -496,20 +613,36 @@ async runAllyTurn(actor) {
     }
   }
 
-  if (role === '디버퍼') {
-    this.applyBreak(target, isLimitTurn ? 3 : 2, isLimitTurn ? 'EXPOSE' : 'BREAK');
+  if (isLimitTurn && limitGifMs) {
+    const remainingLimitGifMs = Math.max(0, limitGifMs - limitWaitSpent);
+    if (remainingLimitGifMs > 0) await wait(remainingLimitGifMs);
+    actor.state = 'idle';
+    this.syncCombatant(actor);
   }
-  if (role === '탱커') {
-    this.applyBuff(actor, 'guard', isLimitTurn ? 3 : 2, 'GUARD');
-    this.applyBuff(actor, 'taunt', isLimitTurn ? 3 : 2, 'DRAW');
+
+  if (this.hasJobRole(actor, '디버퍼') && (isLimitTurn || (this.canUseSkill(actor, 'debuff') && ((target.effects?.break || 0) <= 0 || target.isBoss)))) {
+    const exposeTurns = job === '학자' || job === '청마도사' || job === '소환사' ? 3 : 2;
+    this.addFloater({ x: clamp(target.x + 1, 8, 92), y: clamp(target.y + 20, 10, 92), value: this.getJobActionLabel(actor, { support: 'debuff' }), variant: 'debuff' });
+    this.applyBreak(target, isLimitTurn ? 3 : exposeTurns, isLimitTurn || job === '도적' || job === '닌자' ? 'EXPOSE' : 'BREAK');
+    this.recordUnitBattleStat(actor, 'debuffs');
+    if (!isLimitTurn) this.setSkillCooldown(actor, 'debuff', job === '흑마도사' || job === '소환사' ? 2 : 1);
   }
-  if (isLimitTurn && role === '힐러') {
-    pickAlive(this.allies).forEach((ally) => this.applyHeal(ally, Math.round(ally.maxHp * 0.12), 'heal'));
+  if (this.hasJobRole(actor, '탱커') && isLimitTurn) {
+    this.applyBuff(actor, 'guard', job === '성기사' ? 4 : 3, 'GUARD');
+    this.applyBuff(actor, 'taunt', job === '성기사' ? 4 : 3, '도발');
   }
-  if (isLimitTurn && role === '버퍼') {
+  if (isLimitTurn && this.hasJobRole(actor, '힐러')) {
+    const rate = job === '백마도사' ? 0.18 : 0.12;
     pickAlive(this.allies).forEach((ally) => {
-      this.applyBuff(ally, 'attackUp', 1, 'ATK↑');
-      this.applyBuff(ally, 'critUp', 1, 'CRIT↑');
+      const healed = this.applyHeal(ally, Math.round(ally.maxHp * rate), 'heal');
+      this.recordUnitBattleStat(actor, 'healing', healed);
+    });
+  }
+  if (isLimitTurn && this.hasJobRole(actor, '버퍼')) {
+    pickAlive(this.allies).forEach((ally) => {
+      this.applyBuff(ally, 'attackUp', 2, 'ATK↑');
+      this.applyBuff(ally, 'critUp', 2, 'CRIT↑');
+      this.recordUnitBattleStat(actor, 'buffs', 2);
     });
   }
 
@@ -520,7 +653,7 @@ async runAllyTurn(actor) {
       // 스킵 가능 Promise: 탭 스킵 또는 재생 완료 중 먼저 오는 것
       const limitMs = await actor.limitDurationPromise;
       const elapsed = Date.now() - (actor.limitStartTime || Date.now());
-      const remaining = Math.max(0, (limitMs / 1.5) - elapsed);
+      const remaining = Math.max(0, limitMs - elapsed);
       await new Promise(r => {
         actor._limitSkipResolve = r;
         if (remaining > 0) setTimeout(r, remaining);
@@ -529,14 +662,14 @@ async runAllyTurn(actor) {
       this.hideLimitCutscene();
       await wait(150);
     } else {
-      await wait(70);
+      await wait(35);
     }
   } else {
-    await wait(70);
+    await wait(35);
   }
   if (Math.abs(recovery.x - actor.homeX) > 3 || Math.abs(recovery.y - actor.homeY) > 0.5) {
     await this.moveActor(actor, recovery.x, recovery.y, recoilDuration, 'move', 'move');
-    await wait(40);
+    await wait(20);
   }
   await this.moveActor(actor, actor.homeX, actor.homeY, returnDuration, 'move', 'idle');
 
@@ -546,24 +679,24 @@ async runAllyTurn(actor) {
     actor.state = 'idle';
   } else {
     actor.actionCount += 1;
-    actor.idleState = actor.actionCount >= 3 ? 'casting' : 'idle';
+    actor.idleState = 'idle';
     actor.state = actor.idleState;
   }
   this.decayAllyActionEffects(actor);
   this.syncCombatant(actor);
   this.syncDangerState();
-  await wait(100);
+  await wait(50);
 },
 
 async runEnemyTurn(actor) {
   const target = this.pickClosestTarget(actor, pickAlive(this.allies));
   if (!target) return;
 
-  await wait(actor.isBoss ? 180 : 140);
+  await wait(actor.isBoss ? 90 : 70);
   const contact = this.getEnemyContact(actor, target);
   const recovery = this.getRecoveryPoint(actor, contact);
-  await this.moveActor(actor, contact.x, contact.y, actor.isBoss ? 440 : 340, 'idle', 'attack');
-  await wait(actor.isBoss ? 170 : 120);
+  await this.moveActor(actor, contact.x, contact.y, actor.isBoss ? 220 : 170, 'idle', 'attack');
+  await wait(actor.isBoss ? 85 : 60);
   actor.state = 'attack';
   this.syncCombatant(actor);
 
@@ -601,23 +734,24 @@ async runEnemyTurn(actor) {
     this.pulseActor(actor, critRoll.crit ? 1.1 : 1.04, critRoll.crit ? 200 : 150);
   }
   this.syncCombatant(target);
-  await wait(actor.isBoss ? 340 : 250);
+  await wait(actor.isBoss ? 170 : 125);
 
   if (Math.abs(recovery.x - actor.homeX) > 2 || Math.abs(recovery.y - actor.homeY) > 0.4) {
-    await this.moveActor(actor, recovery.x, recovery.y, actor.isBoss ? 160 : 120, 'idle', 'idle');
-    await wait(40);
+    await this.moveActor(actor, recovery.x, recovery.y, actor.isBoss ? 80 : 60, 'idle', 'idle');
+    await wait(20);
   }
-  await this.moveActor(actor, actor.homeX, actor.homeY, actor.isBoss ? 380 : 300, 'idle', 'idle');
+  await this.moveActor(actor, actor.homeX, actor.homeY, actor.isBoss ? 190 : 150, 'idle', 'idle');
   actor.state = 'idle';
   this.syncCombatant(actor);
   this.decayEnemyTurnEffects();
   this.syncDangerState();
-  await wait(110);
+  await wait(55);
 },
 
 async finishWave() {
   const clearedBossWave = this.state.home.wave % 5 === 0;
   const gemReward = clearedBossWave ? 150 : 0;
+  const goldReward = 240 + Math.floor(Math.random() * 180);
 
   // 웨이브 클리어 텍스트
   this.showWaveClear();
@@ -633,14 +767,21 @@ async finishWave() {
 
   this.state.home.wave += 1;
   this.state.home.winsToBoss = Math.max(1, 5 - (this.state.home.wave % 5 || 5));
-  this.state.home.rewardGold += 240 + Math.floor(Math.random() * 180);
+  this.state.resources.gold += goldReward;
+  this.state.home.rewardGold = 0;
+  this.recordResourceGain('gold', goldReward);
+  this.recordResourceGain('waves', 1);
   if (gemReward) {
     this.state.resources.gems = (this.state.resources.gems || 0) + gemReward;
+    this.recordResourceGain('gems', gemReward);
+    this.recordResourceGain('bosses', 1);
   }
 
   // 웨이브 리셋 — HP 유지, 턴 카운트만 초기화
   this.allies.forEach((ally) => {
     ally.actionCount = 0;
+    ally.skillClock = 0;
+    ally.skillCooldowns = {};
     ally.idleState = 'idle';
     ally.state = 'idle';
     this.syncCombatant(ally);
@@ -674,6 +815,8 @@ resetParty() {
     ally.x = ally.homeX;
     ally.y = ally.homeY;
     ally.actionCount = 0;
+    ally.skillClock = 0;
+    ally.skillCooldowns = {};
     ally.idleState = 'idle';
     ally.state = 'idle';
     ally.effects = { guard: 0, taunt: 0, attackUp: 0, critUp: 0 };
