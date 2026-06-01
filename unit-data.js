@@ -1,4 +1,5 @@
-﻿const COLLAB_JOB_DATA = {
+import { getLimitBurstData } from './limit-data.js';
+const COLLAB_JOB_DATA = {
   beast_king_crocodine: { jobType: '공용', job: '전사', battleRole: '탱커' },
   dragon_knight_baran: { jobType: '공용', job: '용기사', battleRole: '물리 딜러' },
   hero_dai: { jobType: '공용', job: '전사', battleRole: '물리 딜러' },
@@ -242,15 +243,113 @@ const FINAL_FANTASY_JOB_DATA = {
   ff10_yunalesca: { jobType: '공용', job: '소환사', battleRole: '마법 딜러' },
 };
 
+
+function getCommonPassiveId(unit, jobData = {}) {
+  // low-star common passives only; 5~6성은 이후 유니크 패시브용으로 비워둔다.
+  if (Number(unit?.stars) >= 5 || Number(unit?.minTier) >= 5) return '';
+  const minTier = Number(unit.minTier || unit.stars || 1) || 1;
+  if (minTier >= 5) return null;
+
+  const folderKey = String(unit.folderKey || '').toLowerCase();
+  const name = String(unit.name || '').toLowerCase();
+  const job = jobData.job || unit.job || unit.role || '';
+  const role = jobData.battleRole || unit.battleRole || unit.role || '';
+  const haystack = `${folderKey} ${name}`;
+
+  const TANK = '\uD0F1\uCEE4';
+  const HEALER = '\uD790\uB7EC';
+  const BUFFER = '\uBC84\uD37C';
+  const DEBUFFER = '\uB514\uBC84\uD37C';
+  const MAGIC_DPS = '\uB9C8\uBC95 \uB51C\uB7EC';
+  const PHYSICAL_DPS = '\uBB3C\uB9AC \uB51C\uB7EC';
+
+  const WARRIOR = '\uC804\uC0AC';
+  const ADVENTURER = '\uBAA8\uD5D8\uAC00';
+  const PALADIN = '\uC131\uAE30\uC0AC';
+  const DARK_KNIGHT = '\uC554\uD751\uAE30\uC0AC';
+  const DRAGOON = '\uC6A9\uAE30\uC0AC';
+  const MONK = '\uBABD\uD06C';
+  const SAMURAI = '\uBB34\uC0AC';
+  const NINJA = '\uB2CC\uC790';
+  const THIEF = '\uB3C4\uC801';
+  const MACHINIST = '\uAE30\uACF5\uC0AC';
+  const GAMBLER = '\uB3C4\uBC15\uC0AC';
+  const WHITE_MAGE = '\uBC31\uB9C8\uB3C4\uC0AC';
+  const BLACK_MAGE = '\uD751\uB9C8\uB3C4\uC0AC';
+  const BLUE_MAGE = '\uCCAD\uB9C8\uB3C4\uC0AC';
+  const SUMMONER = '\uC18C\uD658\uC0AC';
+  const MAGIC_KNIGHT = '\uB9C8\uB3C4\uC804\uC0AC';
+  const RUNE_KNIGHT = '\uB8EC\uB098\uC774\uD2B8';
+  const SCHOLAR = '\uD559\uC790';
+  const ONION_KNIGHT = '\uC591\uD30C\uAC80\uC0AC';
+
+  if (/locke|rikku|zidane|yuffie|vaan|faris|hawkeye|reno|treasure|thief|materia_hunter|adventurer_locke/.test(haystack)) return 'loot_sense';
+  if (/fledgling|onion|trainee|young|cadet|student|apprentice|beginner|novice|arc|refia/.test(haystack)) return 'training_sense';
+  if (/setzer|wakka|selphie|gambler|wild_card/.test(haystack)) return 'battle_focus';
+
+  if (role === HEALER) {
+    if (job === WHITE_MAGE || /maria|rosa|aerith|yuna|penelo|jelanda|charlotte/.test(haystack)) return 'healing_touch';
+    return 'emergency_care';
+  }
+
+  if (role === TANK) {
+    if (job === PALADIN || /cecil|wol|warrior_of_light|ingus|duran|lenneth/.test(haystack)) return 'front_guard';
+    if (job === MONK || job === DARK_KNIGHT || /garland|leon|hyunckel|arngrim/.test(haystack)) return 'tenacious_vitality';
+    return 'iron_stance';
+  }
+
+  if (role === BUFFER) {
+    if (job === WHITE_MAGE || job === PALADIN || /songstress|prayer|light|lenneth/.test(haystack)) return 'protective_prayer';
+    if (job === SUMMONER || job === MAGIC_KNIGHT || job === MACHINIST || /edgar|riesz|bartz|sora|nichol/.test(haystack)) return 'morale_boost';
+    return 'backline_support';
+  }
+
+  if (role === DEBUFFER) {
+    if (job === BLACK_MAGE || job === SUMMONER || job === BLUE_MAGE || /emperor|exdeath|golbez|kefka|kuja|seymour|xande|cloud_of_darkness/.test(haystack)) return 'mind_break';
+    if (job === THIEF || job === NINJA || job === MACHINIST || /shadow|kimahri|seifer|rufus|biggs|wedge/.test(haystack)) return 'armor_disruption';
+    return 'weakness_spotter';
+  }
+
+  if (role === MAGIC_DPS) {
+    if (job === SUMMONER || job === BLUE_MAGE || /rydia|krile|lulu|yunalesca|summoner/.test(haystack)) return 'elemental_resonance';
+    if (job === MAGIC_KNIGHT || job === RUNE_KNIGHT) return 'mana_cycle';
+    return 'arcane_training';
+  }
+
+  if (role === PHYSICAL_DPS) {
+    if (job === DRAGOON || job === NINJA || /kain|dragoon|shadow|edge|aelia/.test(haystack)) return 'opening_strike';
+    if (job === SAMURAI || job === THIEF || /auron|cyan|sephiroth|zack/.test(haystack)) return 'weakness_spotter';
+    if (job === WARRIOR || job === DARK_KNIGHT || job === MONK || /cloud|squall|tidus|jecht|sabin|zell|tifa|dai|adam|kevin/.test(haystack)) return 'assault_instinct';
+    return 'vanguard_breakthrough';
+  }
+
+  if (job === SCHOLAR) return 'mind_break';
+  if (job === ONION_KNIGHT) return 'training_sense';
+  if (job === GAMBLER) return 'battle_focus';
+  if (job === THIEF) return 'loot_sense';
+  if (job === MACHINIST) return 'armor_disruption';
+  if (job === WHITE_MAGE) return 'healing_touch';
+  if (job === BLACK_MAGE) return 'arcane_training';
+  if (job === PALADIN) return 'front_guard';
+  if (job === ADVENTURER) return 'backline_support';
+  if (job === WARRIOR) return 'vanguard_breakthrough';
+
+  return 'battle_focus';
+}
 function applyUnitJobData(unit) {
-  const jobData = FINAL_FANTASY_JOB_DATA[unit.folderKey] || COLLAB_JOB_DATA[unit.folderKey];
+  const jobData = FINAL_FANTASY_JOB_DATA[unit.folderKey] || COLLAB_JOB_DATA[unit.folderKey] || {};
   const job = jobData?.job || unit.role;
+  const commonPassiveId = getCommonPassiveId(unit, jobData);
+  const limitBurstData = getLimitBurstData(unit);
   return {
     ...unit,
     jobType: jobData?.jobType || '공용',
     job,
     jobRoles: jobData?.jobRoles || COMMON_JOB_ROLES[job] || [jobData?.battleRole || unit.role],
     battleRole: jobData?.battleRole || unit.role,
+    limitBurstId: limitBurstData.id,
+    limitBurstName: limitBurstData.name,
+    ...(commonPassiveId ? { commonPassiveId } : {}),
   };
 }
 

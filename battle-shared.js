@@ -30,6 +30,35 @@ export function createImg(candidates, alt) {
   return img;
 }
 
+export function isVideoSource(src = '') {
+  return /\.(webm|mp4)(?:$|[?#])/i.test(String(src));
+}
+
+export function createMediaElement(src = '', alt = '', forceVideo = false) {
+  if (forceVideo || isVideoSource(src)) {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.loop = true;
+    video.preload = 'auto';
+    video.draggable = false;
+    video.dataset.alt = alt;
+    if (src) video.src = src;
+    return video;
+  }
+  const img = document.createElement('img');
+  img.alt = alt;
+  img.draggable = false;
+  if (src) img.src = src;
+  return img;
+}
+
+export function createMedia(candidates, alt) {
+  const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+  return createMediaElement(list[0] || '', alt);
+}
+
 // GIF 파일의 총 재생 시간(ms) + 프레임별 딜레이 파싱
 const _gifCache = new Map();
 
@@ -93,14 +122,18 @@ async function _getGifFrames(src) {
 }
 
 // GIF 재생 완료까지 대기 — 측정값 기반, 최소/최대 범위 보정
-export async function waitForGif(actor, minMs = 200, maxMs = 8000) {
-  // gifDurationPromise가 있으면 측정 완료 후 정확한 시간 대기
+export async function waitForMedia(actor, minMs = 200, maxMs = 8000) {
   let ms = 0;
-  if (actor.gifDurationPromise) {
-    ms = await actor.gifDurationPromise;
+  const durationPromise = actor.mediaDurationPromise || actor.gifDurationPromise;
+  if (durationPromise) {
+    ms = await durationPromise;
   } else {
-    ms = actor.gifDuration || 0;
+    ms = actor.mediaDuration || actor.gifDuration || 0;
   }
   const clamped = Math.min(Math.max(ms || minMs, minMs), maxMs);
-  await wait(clamped);
+  const startedAt = Number(actor.mediaStartedAt) || 0;
+  const elapsed = startedAt ? Math.max(0, performance.now() - startedAt) : 0;
+  await wait(Math.max(0, clamped - elapsed));
 }
+
+export const waitForGif = waitForMedia;

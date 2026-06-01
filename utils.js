@@ -1,4 +1,4 @@
-import { GROUND_DATA, UNIT_ASSET_FOLDERS, DEFAULT_PARTY } from './game-data.js';
+import { GROUND_DATA, QUEST_DATA, UNIT_ASSET_FOLDERS, DEFAULT_PARTY } from './game-data.js';
 import { FULL_UNIT_LIBRARY } from './unit-data.js';
 import { EQUIPMENT_TYPES, getEquipmentPower } from './equipment-data.js';
 
@@ -178,6 +178,111 @@ const SERIES_SYNERGY_STEPS = {
   1: { label: '혼성', bonus: 0, statMultiplier: 1, powerMultiplier: 1, tone: 'neutral' },
 };
 
+export const COMMON_PASSIVES = {
+  loot_sense: { label: '보물 감각', text: '전투력 +2%, 골드 보상 +10%', powerMultiplier: 1.02, statMultiplier: 1.02, rewardGoldBonus: 0.10 },
+  training_sense: { label: '성장 감각', text: '전투력 +2%, 성장석 보상 +10%', powerMultiplier: 1.02, statMultiplier: 1.02, rewardGrowthStoneBonus: 0.10 },
+  battle_focus: { label: '전투 집중', text: '전투력 +4%', powerMultiplier: 1.04, statMultiplier: 1.02 },
+  healing_touch: { label: '치유의 손길', text: '정신 +8%, 회복 성능 +12%', stats: { spr: 1.08 }, healingMultiplier: 1.12 },
+  emergency_care: { label: '응급 처치', text: 'HP +5%, 회복 성능 +10%', stats: { maxHp: 1.05, spr: 1.04 }, healingMultiplier: 1.10 },
+  front_guard: { label: '전열 수호', text: 'HP +6%, 방어/정신 +5%', stats: { maxHp: 1.06, def: 1.05, spr: 1.05 } },
+  tenacious_vitality: { label: '끈질긴 생명력', text: 'HP +10%, 전투력 +2%', stats: { maxHp: 1.10 }, powerMultiplier: 1.02 },
+  iron_stance: { label: '철벽 자세', text: '방어 +10%', stats: { def: 1.10 } },
+  protective_prayer: { label: '보호의 기도', text: 'HP +4%, 정신 +8%', stats: { maxHp: 1.04, spr: 1.08 } },
+  morale_boost: { label: '사기 고양', text: '전투력 +5%', powerMultiplier: 1.05, statMultiplier: 1.02 },
+  backline_support: { label: '후열 지원', text: 'MP/정신 +6%', stats: { mp: 1.06, spr: 1.06 } },
+  mind_break: { label: '정신 붕괴', text: '마력 +6%, 전투력 +3%', stats: { mag: 1.06 }, powerMultiplier: 1.03 },
+  armor_disruption: { label: '장갑 교란', text: '공격 +5%, 마력 +5%', stats: { atk: 1.05, mag: 1.05 } },
+  weakness_spotter: { label: '약점 포착', text: '전투력 +4%, 치명 흐름 강화', powerMultiplier: 1.04, critBonus: 0.04 },
+  elemental_resonance: { label: '원소 공명', text: '마력 +10%', stats: { mag: 1.10 } },
+  mana_cycle: { label: '마력 순환', text: 'MP +8%, 마력 +6%', stats: { mp: 1.08, mag: 1.06 } },
+  arcane_training: { label: '비전 수련', text: '마력 +8%, 전투력 +2%', stats: { mag: 1.08 }, powerMultiplier: 1.02 },
+  opening_strike: { label: '선제 타격', text: '공격 +6%, 전투력 +3%', stats: { atk: 1.06 }, powerMultiplier: 1.03 },
+  assault_instinct: { label: '돌격 본능', text: '공격 +8%', stats: { atk: 1.08 } },
+  vanguard_breakthrough: { label: '선봉 돌파', text: 'HP +4%, 공격 +5%', stats: { maxHp: 1.04, atk: 1.05 } },
+};
+
+
+const UNIQUE_PASSIVE_RULES = [
+  { pattern: /tifa/i, label: '피버 타임 러시', text: '공격 +14%, 전투력 +8%. 연속 타격형 물리 딜러로 강화됩니다.', stats: { atk: 1.14 }, powerMultiplier: 1.08 },
+  { pattern: /sephiroth/i, label: '별을 가르는 영웅담', text: '공격/마력 +10%, 전투력 +12%. 보스전에 강한 피니셔 성향입니다.', stats: { atk: 1.10, mag: 1.10 }, powerMultiplier: 1.12 },
+  { pattern: /cloud|zack|squall|tidus|dai|duran|lucian/i, label: '계승된 검의 의지', text: '공격 +12%, 전투력 +8%. 정면 돌파형 물리 딜러입니다.', stats: { atk: 1.12 }, powerMultiplier: 1.08 },
+  { pattern: /aerith|yuna|lenna|rosa|eiko|garnet|dagger|kairi|charlotte|jelanda/i, label: '기도의 계승자', text: '정신 +14%, HP +6%, 전투력 +5%. 회복과 보호에 특화됩니다.', stats: { spr: 1.14, maxHp: 1.06 }, powerMultiplier: 1.05, healingMultiplier: 1.16 },
+  { pattern: /kefka|kuja|emperor|xande|exdeath|golbez|cloud_of_darkness|garland|xehanort/i, label: '재앙을 부르는 마력', text: '마력 +14%, 전투력 +9%. 약화와 광역 마법 성향이 강화됩니다.', stats: { mag: 1.14 }, powerMultiplier: 1.09 },
+  { pattern: /terra|rinoa|vivi|rydia|braska|yunalesca|angela|freya|lezard|mystina/i, label: '비전의 공명', text: '마력 +12%, MP +10%, 전투력 +7%. 소환/마법형 화력이 강화됩니다.', stats: { mag: 1.12, mp: 1.10 }, powerMultiplier: 1.07 },
+  { pattern: /auron|kain|baran|riesz|freya|fratley|gilgamesh|steiner|beatrix|cecil|dorgann|crocodine|hyunckel|arngrim|lenneth/i, label: '불굴의 전열', text: 'HP +10%, 공격/방어 +8%, 전투력 +6%. 전열 유지력이 강화됩니다.', stats: { maxHp: 1.10, atk: 1.08, def: 1.08 }, powerMultiplier: 1.06 },
+  { pattern: /locke|zidane|faris|yuffie|hawkeye|riku|shadow|vincent|reno/i, label: '바람처럼 사라지는 손', text: '공격 +9%, 전투력 +6%, 골드 보상 +8%. 빠른 약점 공략형입니다.', stats: { atk: 1.09 }, powerMultiplier: 1.06, rewardGoldBonus: 0.08 },
+  { pattern: /edgar|barret|rufus|laguna|irvine|9s|21o/i, label: '전술 장비 운용', text: 'HP +6%, 공격/정신 +7%, 전투력 +6%. 기계 장비와 지원 사격이 강화됩니다.', stats: { maxHp: 1.06, atk: 1.07, spr: 1.07 }, powerMultiplier: 1.06 },
+  { pattern: /sabin|zell|kevin|maam|adam/i, label: '한계 돌파 격투술', text: '공격 +13%, HP +7%, 전투력 +7%. 근접 연타 성능이 강화됩니다.', stats: { atk: 1.13, maxHp: 1.07 }, powerMultiplier: 1.07 },
+  { pattern: /rikku|setzer|selphie/i, label: '행운을 뒤집는 손패', text: '전투력 +6%, 골드/성장석 보상 +8%. 파밍 가치가 높은 지원형입니다.', powerMultiplier: 1.06, rewardGoldBonus: 0.08, rewardGrowthStoneBonus: 0.08 },
+  { pattern: /2b|a2|yorha/i, label: 'YoRHa 전투 프로토콜', text: '공격 +12%, 방어 +6%, 전투력 +8%. 고속 물리전 성능이 강화됩니다.', stats: { atk: 1.12, def: 1.06 }, powerMultiplier: 1.08 },
+  { pattern: /sora|keyblade/i, label: '마음을 잇는 빛', text: '공격/정신 +9%, 전투력 +7%. 파티 지원과 물리 화력을 겸합니다.', stats: { atk: 1.09, spr: 1.09 }, powerMultiplier: 1.07 },
+  { pattern: /genesis/i, label: 'LOVELESS의 잔향', text: '마력 +12%, 공격 +6%, 전투력 +8%. 마검사형 화력이 강화됩니다.', stats: { mag: 1.12, atk: 1.06 }, powerMultiplier: 1.08 },
+  { pattern: /hadlar|eve/i, label: '마왕의 투지', text: '공격/마력 +10%, HP +8%, 전투력 +8%. 균형형 보스 딜러입니다.', stats: { atk: 1.10, mag: 1.10, maxHp: 1.08 }, powerMultiplier: 1.08 },
+  { pattern: /popp/i, label: '대마도사의 각성', text: '마력 +15%, MP +8%, 전투력 +8%. 순수 마법 화력이 크게 오릅니다.', stats: { mag: 1.15, mp: 1.08 }, powerMultiplier: 1.08 },
+  { pattern: /firion|onion|bartz/i, label: '무기 숙련의 달인', text: '공격 +8%, 마력 +8%, 전투력 +9%. 다역할 성장 효율이 높습니다.', stats: { atk: 1.08, mag: 1.08 }, powerMultiplier: 1.09 },
+  { pattern: /dorgann|galuf/i, label: '새벽의 방패', text: 'HP +12%, 방어 +10%, 전투력 +5%. 파티 전열을 지키는 성향입니다.', stats: { maxHp: 1.12, def: 1.10 }, powerMultiplier: 1.05 },
+  { pattern: /beast_king|crocodine/i, label: '수왕의 방패', text: 'HP +15%, 방어 +9%, 전투력 +5%. 탱커 성능이 크게 강화됩니다.', stats: { maxHp: 1.15, def: 1.09 }, powerMultiplier: 1.05 },
+];
+
+function normalizePassiveKey(unit = {}) {
+  return `${unit.folderKey || ''} ${unit.id || ''} ${unit.name || ''}`.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+}
+
+function getHighRarityUniquePassive(unit = {}) {
+  const minTier = Number(unit.minTier || unit.stars || unit.tier || 1);
+  const currentTier = Number(unit.tier || unit.stars || unit.minTier || 1);
+  const maxTier = Number(unit.maxTier || currentTier || minTier);
+  if (Math.max(minTier, currentTier, maxTier) < 5) return null;
+  const key = normalizePassiveKey(unit);
+  const rule = UNIQUE_PASSIVE_RULES.find((item) => item.pattern.test(key));
+  if (rule) {
+    return {
+      id: `unique_${key}`,
+      label: rule.label,
+      text: rule.text,
+      unique: true,
+      stats: rule.stats || {},
+      powerMultiplier: rule.powerMultiplier || 1.06,
+      statMultiplier: rule.statMultiplier || 1,
+      rewardGoldBonus: rule.rewardGoldBonus || 0,
+      rewardGrowthStoneBonus: rule.rewardGrowthStoneBonus || 0,
+      healingMultiplier: rule.healingMultiplier || 0,
+    };
+  }
+  const role = getUnitBattleRole(unit);
+  const fallbackByRole = role === '힐러'
+    ? { stats: { spr: 1.10, maxHp: 1.05 }, text: '정신 +10%, HP +5%, 전투력 +5%. 회복 지원 성향이 강화됩니다.' }
+    : role === '마법 딜러'
+      ? { stats: { mag: 1.11, mp: 1.06 }, text: '마력 +11%, MP +6%, 전투력 +6%. 마법 화력이 강화됩니다.' }
+      : role === '탱커'
+        ? { stats: { maxHp: 1.12, def: 1.08 }, text: 'HP +12%, 방어 +8%, 전투력 +5%. 전열 생존력이 강화됩니다.' }
+        : { stats: { atk: 1.10, maxHp: 1.04 }, text: '공격 +10%, HP +4%, 전투력 +6%. 주력 전투 성능이 강화됩니다.' };
+  return {
+    id: `unique_${key}`,
+    label: `${unit.name || '유닛'}의 증명`,
+    text: fallbackByRole.text,
+    unique: true,
+    stats: fallbackByRole.stats,
+    powerMultiplier: role === '탱커' || role === '힐러' ? 1.05 : 1.06,
+    statMultiplier: 1,
+  };
+}
+export function getCommonPassiveDefinition(passiveId) {
+  return COMMON_PASSIVES[passiveId] || null;
+}
+
+export function getUnitCommonPassive(unit) {
+  const passive = getCommonPassiveDefinition(unit?.commonPassiveId);
+  if (passive) return { id: unit.commonPassiveId, ...passive };
+  return getHighRarityUniquePassive(unit);
+}
+
+export function getPartyCommonPassiveSummary(state) {
+  const passives = getPartyUnits(state).map((unit) => getUnitCommonPassive(unit)).filter(Boolean);
+  const rewardGoldBonus = Math.min(0.5, passives.reduce((total, passive) => total + (Number(passive.rewardGoldBonus) || 0), 0));
+  const rewardGrowthStoneBonus = Math.min(0.5, passives.reduce((total, passive) => total + (Number(passive.rewardGrowthStoneBonus) || 0), 0));
+  return { passives, rewardGoldBonus, rewardGrowthStoneBonus };
+}
 const STANDALONE_TRAITS = {
   FF1: { label: '빛의 전사', bonus: 30, statBonus: 14, statMultiplier: 1.14, powerMultiplier: 1.30 },
 };
@@ -473,8 +578,8 @@ const BOND_RULES = [
     series: 'C-KH',
     members: ['Sora', 'Riku', 'Kairi'],
     min: 3,
-    bonus: 18,
-    statBonus: 9,
+    bonus: 24,
+    statBonus: 12,
   },
   {
     id: 'nier-androids',
@@ -959,8 +1064,8 @@ const BOND_RULES = [
     series: 'FF7',
     members: ['Cloud', 'Barret', 'Tifa', 'Jessie', 'Biggs&Wedge'],
     min: 3,
-    bonus: 20,
-    statBonus: 10,
+    bonus: 28,
+    statBonus: 14,
   },
   {
     id: 'ff7-crisis-legacy',
@@ -977,8 +1082,8 @@ const BOND_RULES = [
     series: 'FF7',
     members: ['Cloud', 'Sephiroth', 'Genesis'],
     min: 2,
-    bonus: 14,
-    statBonus: 6,
+    bonus: 22,
+    statBonus: 10,
   },
   {
     id: 'ff8-orphanage-memory',
@@ -1013,8 +1118,8 @@ const BOND_RULES = [
     series: 'FF9',
     members: ['Steiner', 'Beatrix'],
     min: 2,
-    bonus: 12,
-    statBonus: 7,
+    bonus: 18,
+    statBonus: 9,
   },
   {
     id: 'ff9-memory-of-gaia',
@@ -1040,8 +1145,8 @@ const BOND_RULES = [
     series: 'FF10',
     members: ['Tidus', 'Yuna', 'Auron', 'Jecht'],
     min: 3,
-    bonus: 18,
-    statBonus: 9,
+    bonus: 26,
+    statBonus: 13,
   },
   {
     id: 'ff10-al-bhed-operation',
@@ -1280,8 +1385,8 @@ export function getRoleComboSummary(state) {
 
   const rawBonus = active.reduce((total, rule) => total + rule.bonus, 0);
   const rawStatBonus = active.reduce((total, rule) => total + rule.statBonus, 0);
-  const bonus = Math.min(70, rawBonus);
-  const statBonus = Math.min(34, rawStatBonus);
+  const bonus = Math.min(90, rawBonus);
+  const statBonus = Math.min(45, rawStatBonus);
   const label = active.length ? active.slice(0, 2).map((rule) => rule.label).join(' · ') : '조합 없음';
   const tone = bonus >= 50 ? 'best' : bonus >= 30 ? 'good' : bonus > 0 ? 'ok' : 'neutral';
   return {
@@ -1414,6 +1519,7 @@ export function cloneState() {
       energy: { current: 82, max: 120 },
       gold: 128400,
       gems: 99999,
+      growthStone: 800,
       specialTickets: 0,
     },
     nickname: '',
@@ -1423,7 +1529,7 @@ export function cloneState() {
       slots: [...DEFAULT_PARTY],
       formation: defaultPartyFormation(),
     },
-    units: [], // 소환으로만 유닛 획득
+    units: createStarterUnits(),
     equipment: {
       inventory: [],
       equipped: {},
@@ -1438,7 +1544,11 @@ export function cloneState() {
       winsToBoss: 3,
       rewardGold: 4680,
       autoRunning: true,
+      stageClears: {},
+      stageBestWaves: {},
+      battleLogs: [],
     },
+    quests: normalizeQuestState(),
   };
 }
 
@@ -1678,10 +1788,129 @@ function serializeUnitForStorage(unit) {
     tier: unit.tier,
     level: unit.level,
     shards: unit.shards || 0,
+    limitBreak: unit.limitBreak || 0,
     hp: unit.hp,
   });
 }
+function createOwnedUnit(unit) {
+  const tier = Number(unit?.minTier) || Number(unit?.stars) || 1;
+  return {
+    ...unit,
+    tier,
+    level: 1,
+    shards: 0,
+    hp: Number(unit?.maxHp) || 1,
+  };
+}
 
+function createStarterUnits() {
+  return DEFAULT_PARTY
+    .map((unitId) => FULL_UNIT_LIBRARY.find((unit) => unit.id === unitId))
+    .filter(Boolean)
+    .map(createOwnedUnit);
+}
+function todayQuestKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function normalizeQuestState(quests = {}) {
+  const today = todayQuestKey();
+  const daily = quests.daily && typeof quests.daily === 'object' ? quests.daily : {};
+  return {
+    claimed: quests.claimed && typeof quests.claimed === 'object' ? quests.claimed : {},
+    daily: {
+      date: daily.date === today ? today : today,
+      claimed: daily.date === today && daily.claimed && typeof daily.claimed === 'object' ? daily.claimed : {},
+      progress: daily.date === today && daily.progress && typeof daily.progress === 'object' ? daily.progress : {},
+    },
+  };
+}
+
+export function recordQuestProgress(state, key, amount = 1) {
+  if (!state) return;
+  state.quests = normalizeQuestState(state.quests);
+  const progress = state.quests.daily.progress;
+  progress[key] = (Number(progress[key]) || 0) + Math.max(0, Math.floor(Number(amount) || 0));
+}
+
+function getQuestClaimStore(state, quest) {
+  state.quests = normalizeQuestState(state.quests);
+  return quest.group === 'daily' ? state.quests.daily.claimed : state.quests.claimed;
+}
+
+export function getQuestMetricValue(state, metric = '') {
+  if (metric.startsWith('stageClear:')) {
+    const groundId = metric.split(':')[1];
+    return getGroundStageState(state, groundId).cleared ? 1 : 0;
+  }
+  if (metric.startsWith('daily:')) {
+    const key = metric.split(':')[1];
+    const quests = normalizeQuestState(state?.quests || {});
+    return Number(quests.daily.progress?.[key]) || 0;
+  }
+  if (metric === 'partyPower') return getPartyPower(state);
+  if (metric === 'ownedUnits') return Array.isArray(state?.units) ? state.units.length : 0;
+  if (metric === 'fiveStarUnits') return (state?.units || []).filter((unit) => Number(unit.stars || unit.tier || 0) >= 5).length;
+  if (metric === 'equipmentOwned') return state?.equipment?.inventory?.length || 0;
+  if (metric === 'bosses') return Number(state?.home?.earnedResources?.bosses) || 0;
+  if (metric === 'waves') return Number(state?.home?.earnedResources?.waves) || 0;
+  return 0;
+}
+
+export function getQuestStatus(state, quest) {
+  const current = getQuestMetricValue(state, quest.metric);
+  const target = Math.max(1, Number(quest.target) || 1);
+  const store = getQuestClaimStore(state, quest);
+  const claimed = Boolean(store[quest.id]);
+  const complete = current >= target;
+  return {
+    ...quest,
+    current,
+    target,
+    progress: Math.max(0, Math.min(1, current / target)),
+    complete,
+    claimed,
+    claimable: complete && !claimed,
+  };
+}
+
+export function getQuestSummary(state) {
+  const quests = QUEST_DATA.map((quest) => getQuestStatus(state, quest));
+  return {
+    all: quests,
+    claimable: quests.filter((quest) => quest.claimable),
+    byGroup: {
+      story: quests.filter((quest) => quest.group === 'story'),
+      daily: quests.filter((quest) => quest.group === 'daily'),
+      achievement: quests.filter((quest) => quest.group === 'achievement'),
+    },
+  };
+}
+
+export function formatQuestReward(reward = {}) {
+  return [
+    reward.gold ? `골드 ${formatNumber(reward.gold)}` : '',
+    reward.gems ? `다이아 ${formatNumber(reward.gems)}` : '',
+    reward.growthStone ? `성장석 ${formatNumber(reward.growthStone)}` : '',
+
+    reward.tickets ? `티켓 ${formatNumber(reward.tickets)}` : '',
+  ].filter(Boolean).join(' · ') || '보상 없음';
+}
+
+export function claimQuestReward(state, questId) {
+  const quest = QUEST_DATA.find((item) => item.id === questId);
+  if (!quest) return { ok: false, reason: 'missing' };
+  const status = getQuestStatus(state, quest);
+  if (!status.claimable) return { ok: false, reason: status.claimed ? 'claimed' : 'incomplete', status };
+  const reward = quest.reward || {};
+  state.resources.gold = (Number(state.resources.gold) || 0) + (Number(reward.gold) || 0);
+  state.resources.gems = (Number(state.resources.gems) || 0) + (Number(reward.gems) || 0);
+  state.resources.growthStone = (Number(state.resources.growthStone) || 0) + (Number(reward.growthStone) || 0);
+  state.resources.specialTickets = (Number(state.resources.specialTickets) || 0) + (Number(reward.tickets) || 0);
+  const store = getQuestClaimStore(state, quest);
+  store[quest.id] = Date.now();
+  return { ok: true, quest, reward, status: getQuestStatus(state, quest) };
+}
 export function createPersistedState(state, savedAt = Date.now()) {
   return cleanForStorage({
     _savedAt: savedAt,
@@ -1693,16 +1922,17 @@ export function createPersistedState(state, savedAt = Date.now()) {
     equipment: state.equipment,
     visualProfiles: normalizeVisualProfiles(state.visualProfiles || {}),
     home: state.home,
+    quests: normalizeQuestState(state.quests),
   });
 }
 
 export function loadAppState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return cloneState();
+    if (!raw) return ensureUnlockedHomeGround(cloneState());
     const saved = JSON.parse(raw);
     const fallback = cloneState();
-    return {
+    const loaded = {
       ...fallback,
       ...saved,
       resources: {
@@ -1717,6 +1947,7 @@ export function loadAppState() {
         ...fallback.home,
         ...(saved.home || {}),
       },
+      quests: normalizeQuestState(saved.quests || fallback.quests),
       party: {
         ...fallback.party,
         ...(saved.party || {}),
@@ -1728,13 +1959,16 @@ export function loadAppState() {
         ? saved.units.map((u) => {
             const base = FULL_UNIT_LIBRARY.find((b) => b.folderKey === u.folderKey || b.id === u.id);
             if (!base) return u;
-            const merged = { shards: 0, ...base, ...u,
+            const merged = { shards: 0, limitBreak: 0, ...base, ...u,
               // 마스터 데이터 항목은 항상 unit-data.js 기준으로 덮어씌움
               role:        base.role,
               jobType:     base.jobType,
               job:         base.job,
               jobRoles:    base.jobRoles,
               battleRole:  base.battleRole || base.role,
+              commonPassiveId: base.commonPassiveId,
+              limitBurstId: base.limitBurstId,
+              limitBurstName: base.limitBurstName,
               stars:       base.stars,
               minTier:     base.minTier,
               maxTier:     base.maxTier,
@@ -1753,15 +1987,26 @@ export function loadAppState() {
             const minTier = Number(merged.minTier) || 1;
             const maxTier = Number(merged.maxTier) || minTier;
             merged.tier = Math.max(minTier, Math.min(maxTier, Number(merged.tier) || minTier));
+            merged.stars = Math.max(1, Math.min(6, Math.floor(Number(merged.tier) || Number(base.stars) || 1)));
+            merged.limitBreak = Math.max(0, Math.floor(Number(merged.limitBreak) || Math.max(0, merged.tier - minTier)));
             return merged;
           }).filter(u => u.tierFolders)
         : fallback.units,
     };
+    return ensureUnlockedHomeGround(loaded);
   } catch {
-    return cloneState();
+    return ensureUnlockedHomeGround(cloneState());
   }
 }
 
+function ensureUnlockedHomeGround(state) {
+  if (!isGroundUnlocked(state, state.home?.groundId)) {
+    state.home.groundId = getFirstUnlockedGroundId(state);
+    state.home.wave = Math.max(1, Number(state.home.stageBestWaves?.[state.home.groundId]) || 1);
+    state.home.winsToBoss = Math.max(1, 5 - (state.home.wave % 5 || 5));
+  }
+  return state;
+}
 export function saveAppState(state) {
   try {
     const persisted = createPersistedState(state);
@@ -1833,12 +2078,15 @@ export function getEffectiveUnitStats(state, unit) {
   const seriesSynergy = getUnitSeriesSynergy(state, unit);
   const roleCombo = getRoleComboSummary(state);
   const standaloneTrait = getUnitStandaloneTrait(unit);
+  const commonPassive = getUnitCommonPassive(unit) || {};
   const applySynergy = (value, key) => Math.max(0, Math.round(
     (Number(value) || 0)
       * (formationMultipliers[key] || 1)
       * (standaloneTrait.statMultiplier || 1)
       * (seriesSynergy.statMultiplier || 1)
       * (roleCombo.statMultiplier || 1)
+      * (commonPassive.statMultiplier || 1)
+      * (commonPassive.stats?.[key] || 1)
   ));
 
   const rawMaxHp = (Number(unit.maxHp) || 0) + (Number(bonus.maxHp) || 0);
@@ -1853,6 +2101,7 @@ export function getEffectiveUnitStats(state, unit) {
   const standalonePower = Math.round((rawPower + formationPower) * ((standaloneTrait.powerMultiplier || 1) - 1));
   const seriesPower = Math.round((rawPower + formationPower + standalonePower) * ((seriesSynergy.powerMultiplier || 1) - 1));
   const comboPower = Math.round((rawPower + formationPower + standalonePower + seriesPower) * ((roleCombo.powerMultiplier || 1) - 1));
+  const commonPower = Math.round((rawPower + formationPower + standalonePower + seriesPower + comboPower) * ((commonPassive.powerMultiplier || 1) - 1));
   return {
     ...unit,
     basePower,
@@ -1864,11 +2113,13 @@ export function getEffectiveUnitStats(state, unit) {
     seriesSynergy,
     comboPower,
     roleCombo,
+    commonPassive,
+    commonPower,
     formationRow,
     formationFit,
     formationMultipliers,
     equipmentStats: bonus,
-    power: Math.max(0, rawPower + formationPower + standalonePower + seriesPower + comboPower),
+    power: Math.max(0, rawPower + formationPower + standalonePower + seriesPower + comboPower + commonPower),
     maxHp,
     hp,
     mp: applySynergy((Number(unit.mp) || 0) + (Number(bonus.mp) || 0), 'mp'),
@@ -1909,6 +2160,45 @@ export function resolveGround(groundId) {
   return GROUND_DATA[groundId] || GROUND_DATA.meadow;
 }
 
+export function getGroundStageState(state, groundId = state?.home?.groundId) {
+  const id = GROUND_DATA[groundId] ? groundId : 'meadow';
+  const ground = resolveGround(id);
+  const activeWave = Math.max(1, Math.floor(Number(state?.home?.wave) || 1));
+  const currentWave = state?.home?.groundId === id ? activeWave : 1;
+  const bestWaves = state?.home?.stageBestWaves || {};
+  const bestWave = Math.max(currentWave, Math.floor(Number(bestWaves[id]) || 0));
+  const targetWave = Math.max(5, Math.floor(Number(ground.targetWave) || 15));
+  const cleared = Boolean(state?.home?.stageClears?.[id]) || bestWave > targetWave;
+  const progress = Math.max(0, Math.min(1, (bestWave - 1) / Math.max(1, targetWave - 1)));
+  return { id, ground, currentWave, bestWave, targetWave, cleared, progress };
+}
+
+export function getGroundRewardInfo(ground) {
+  const firstClear = ground?.firstClear || { gold: 0, gems: 0 };
+  const repeatBoss = ground?.repeatBoss || { gold: 0, gems: 0 };
+  return { firstClear, repeatBoss };
+}
+
+export function isGroundUnlocked(state, groundId) {
+  const ground = resolveGround(groundId);
+  if (!ground?.requires) return true;
+  return getGroundStageState(state, ground.requires).cleared;
+}
+
+export function getFirstUnlockedGroundId(state) {
+  return Object.keys(GROUND_DATA).find((groundId) => isGroundUnlocked(state, groundId)) || 'meadow';
+}
+
+export function getGroundUnlockRequirement(state, groundId) {
+  const ground = resolveGround(groundId);
+  if (!ground?.requires) return null;
+  const required = resolveGround(ground.requires);
+  return {
+    groundId: ground.requires,
+    label: required.label,
+    cleared: getGroundStageState(state, ground.requires).cleared,
+  };
+}
 export function resolveUnitFolder(unit) {
   // tier 기반 (신규)
   if (unit.tierFolders) {
@@ -1963,6 +2253,16 @@ const NO_MOVE_FOLDERS = new Set([
   "images/units/FF9/FF9_Knight_of_Pluto_Captain_Steiner_T6",
 ]);
 
+const SPRITE_MEDIA_EXTENSIONS = ['webm', 'mp4', 'gif'];
+
+function buildSpriteMediaCandidates(basePath, names) {
+  return names.flatMap((name) => SPRITE_MEDIA_EXTENSIONS.map((ext) => `${basePath}/${name}.${ext}`));
+}
+
+function buildSpriteImageCandidates(basePath, names) {
+  return names.map((name) => `${basePath}/${name}.gif`);
+}
+
 export function resolveUnitSprite(unit, state) {
   const folder = resolveUnitFolder(unit);
   if (!folder) return '';
@@ -1976,13 +2276,29 @@ export function resolveUnitSprite(unit, state) {
     defeat:  ['defeat', 'idle'],
   };
   const candidates = map[state] || map.idle;
-  return candidates.map((name) => `${folder}/${name}.gif`);
+  return buildSpriteMediaCandidates(folder, candidates);
 }
 
+
+export function resolveUnitImageSprite(unit, state) {
+  const folder = resolveUnitFolder(unit);
+  if (!folder) return '';
+  const map = {
+    idle:    ['idle'],
+    move:    NO_MOVE_FOLDERS.has(folder) ? ['idle'] : ['move', 'idle'],
+    attack:  ['attack', 'idle'],
+    casting: ['casting', 'idle'],
+    limit:   ['limit', 'ilmit', 'attack', 'idle'],
+    victory: ['victory', 'idle'],
+    defeat:  ['defeat', 'idle'],
+  };
+  const candidates = map[state] || map.idle;
+  return buildSpriteImageCandidates(folder, candidates);
+}
 export function resolveUnitPortrait(unit) {
   const folder = resolveUnitFolder(unit);
   if (!folder) return [];
-  return [`${folder}/1.png`, ...resolveUnitSprite(unit, 'idle')];
+  return [`${folder}/1.png`, ...resolveUnitImageSprite(unit, 'idle')];
 }
 
 export const RARITY_COLORS = {
@@ -2015,5 +2331,6 @@ export function resolveMonsterSprite(monsterId, state, isBoss) {
     idle:   ['idle', 'atk'],
     attack: ['atk', 'idle'],
   };
-  return (map[state] || map.idle).map((name) => `images/monsters/W1/${folder}/${monsterId}_${name}.gif`);
+  return (map[state] || map.idle)
+    .flatMap((name) => SPRITE_MEDIA_EXTENSIONS.map((ext) => `images/monsters/W1/${folder}/${monsterId}_${name}.${ext}`));
 }

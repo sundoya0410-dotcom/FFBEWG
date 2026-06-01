@@ -1,5 +1,5 @@
 import { FULL_UNIT_LIBRARY } from './unit-data.js';
-import { formatNumber, renderStars, resolveUnitPortrait, ensureEquipmentState, renderVisualVars, saveAppState } from './utils.js';
+import { formatNumber, renderStars, resolveUnitPortrait, resolveUnitSprite, resolveUnitImageSprite, ensureEquipmentState, renderVisualVars, saveAppState, recordQuestProgress, getUnitCommonPassive } from './utils.js';
 import {
   EQUIPMENT_TYPE_LABELS,
   EQUIPMENT_RARITIES,
@@ -39,12 +39,15 @@ let smnResults = null;
 let smnResultType = '';
 let smnRepeatAction = '';
 
-function getPortraitSources(unit) {
-  return resolveUnitPortrait(unit).filter(Boolean);
+function getSummonUnitSources(unit) {
+  return [
+    ...resolveUnitImageSprite(unit, 'idle'),
+    ...resolveUnitPortrait(unit),
+  ].filter(Boolean);
 }
 
-function renderPortraitImg(state, unit, className = '') {
-  const sources = getPortraitSources(unit);
+function renderSummonUnitSprite(state, unit, className = '') {
+  const sources = getSummonUnitSources(unit);
   const src = sources[0] || '';
   const fallback = sources[1] || '';
   if (!src) return '';
@@ -69,64 +72,57 @@ function pickUnit(state, weights) {
   const owned = state.units.find((unit) => unit.folderKey === picked.folderKey);
   const isDup = !!owned;
 
+  let shardCount = 0;
+  let canPromote = false;
   if (owned) {
     owned.shards = (owned.shards || 0) + 1;
+    shardCount = owned.shards;
+    canPromote = shardCount >= 3;
   } else {
     state.units.push({
       ...picked,
       tier: picked.minTier,
       level: 1,
       shards: 0,
+      limitBreak: 0,
       hp: picked.maxHp,
     });
   }
 
-  return { ...picked, isDup };
+  return { ...picked, isDup, shardCount, canPromote };
 }
 
-async function doUnitSummon(state, save, syncHud, type, count) {
+function doUnitSummon(state, save, syncHud, type, count) {
   const costKey = `${type}_${count === 1 ? 'single' : 'multi'}`;
   const cost = SUMMON_COST[costKey];
-  if (state.resources.gems < cost) return null;
+  const adminFreeResources = Boolean(state.adminMode);
+  if (!adminFreeResources && state.resources.gems < cost) return null;
 
-  const previousGems = state.resources.gems;
-  const previousUnits = state.units.map((unit) => ({ ...unit }));
-  state.resources.gems -= cost;
+  if (!adminFreeResources) state.resources.gems -= cost;
   const weights = type === 'normal' ? NORMAL_WEIGHTS : RARE_WEIGHTS;
   const results = Array.from({ length: count }, () => pickUnit(state, weights));
+  recordQuestProgress(state, 'summons', count);
 
-  const saveResult = await save({ silent: false });
-  if (!saveResult.cloud) {
-    state.resources.gems = previousGems;
-    state.units = previousUnits;
-    saveAppState(state);
-    syncHud();
-    return null;
-  }
+  saveAppState(state);
   syncHud();
+  save({ silent: true, showStatus: true }).catch((error) => console.warn('[FFBEWG] summon save failed:', error));
   return results;
 }
 
-async function doEquipmentSummon(state, save, syncHud, count) {
+function doEquipmentSummon(state, save, syncHud, count) {
   const cost = count === 10 ? EQUIPMENT_SUMMON_COST.multi : EQUIPMENT_SUMMON_COST.single;
-  if (state.resources.gems < cost) return null;
+  const adminFreeResources = Boolean(state.adminMode);
+  if (!adminFreeResources && state.resources.gems < cost) return null;
 
-  const previousGems = state.resources.gems;
-  const previousInventory = [...(state.equipment?.inventory || [])];
-  state.resources.gems -= cost;
+  if (!adminFreeResources) state.resources.gems -= cost;
   const equipment = ensureEquipmentState(state);
   const results = Array.from({ length: count }, () => createEquipmentDrop());
   equipment.inventory.push(...results);
+  recordQuestProgress(state, 'summons', count);
 
-  const saveResult = await save({ silent: false });
-  if (!saveResult.cloud) {
-    state.resources.gems = previousGems;
-    equipment.inventory = previousInventory;
-    saveAppState(state);
-    syncHud();
-    return null;
-  }
+  saveAppState(state);
   syncHud();
+  save({ silent: true, showStatus: true }).catch((error) => console.warn('[FFBEWG] summon save failed:', error));
   return results;
 }
 
@@ -152,21 +148,24 @@ function renderEquipmentRatePills() {
 function renderRepeatSummonButton(state, hidden = false) {
   const meta = SUMMON_ACTION_META[smnRepeatAction];
   if (!meta) return '';
-  const canBuy = state.resources.gems >= meta.cost;
+  const adminFreeResources = Boolean(state.adminMode);
+  const canBuy = adminFreeResources || state.resources.gems >= meta.cost;
+  const costText = adminFreeResources ? '관리자 무료' : `다이아 ${formatNumber(meta.cost)}`;
   return `
     <button class="smn-repeat-btn ${canBuy ? '' : 'is-disabled'}" id="smnRepeatBtn" data-smn="${smnRepeatAction}" ${canBuy ? '' : 'disabled'} ${hidden ? 'hidden' : ''} type="button">
       <span>연속 ${meta.label}</span>
-      <strong>다이아 ${formatNumber(meta.cost)}</strong>
+      <strong>${costText}</strong>
     </button>
   `;
 }
 
-function renderSummonButton(label, cost, action, gems) {
-  const canBuy = gems >= cost;
+function renderSummonButton(label, cost, action, gems, adminFreeResources = false) {
+  const canBuy = adminFreeResources || gems >= cost;
+  const costText = adminFreeResources ? '관리자 무료' : `다이아 ${formatNumber(cost)}`;
   return `
     <button class="smn-btn ${canBuy ? '' : 'is-disabled'}" data-smn="${action}" ${canBuy ? '' : 'disabled'} type="button">
       <span>${label}</span>
-      <strong>다이아 ${formatNumber(cost)}</strong>
+      <strong>${costText}</strong>
     </button>
   `;
 }
@@ -207,15 +206,51 @@ export function renderSummonScreen(ctx) {
   `;
 }
 
+function renderUnitSummonSummary() {
+  if (!Array.isArray(smnResults) || !smnResults.length || smnResultType !== 'unit') return '';
+  const dupes = smnResults.filter((result) => result.isDup).length;
+  const promotable = smnResults.filter((result) => result.canPromote).length;
+  const news = smnResults.length - dupes;
+  const highRarity = smnResults.filter((result) => Number(result.stars) >= 5).length;
+  const passiveCount = smnResults.filter((result) => getUnitCommonPassive(result)).length;
+  return `
+    <div class="smn-result-summary">
+      <span>신규 ${news}</span>
+      <span>중복 ${dupes}</span>
+      <span class="${promotable ? 'is-hot' : ''}">승급 가능 ${promotable}</span>
+      ${highRarity ? `<span class="is-hot">5성+ ${highRarity}</span>` : ''}
+      ${passiveCount ? `<span>패시브 ${passiveCount}</span>` : ''}
+    </div>
+  `;
+}
+
+function renderSummonResultBadge(result) {
+  if (!result.isDup) return '<div class="smn-crystal__new smn-crystal__new--new">NEW</div>';
+  return `<div class="smn-crystal__new${result.canPromote ? ' is-promotable' : ''}">조각 +1 · ${result.shardCount || 0}/3${result.canPromote ? '<strong>승급 가능</strong>' : ''}</div>`;
+}
+function renderSummonPassiveInfo(result) {
+  const passive = getUnitCommonPassive(result);
+  if (!passive) return '';
+  const label = passive.unique ? '\uace0\uc720 \ud328\uc2dc\ube0c' : '\ud328\uc2dc\ube0c';
+  const text = passive.text || '';
+  return `
+    <div class="smn-crystal__passive${passive.unique ? ' is-unique' : ''}">
+      <span>${label}</span>
+      <strong>${passive.label || '\uc804\ud22c \ud2b9\uc131'}</strong>
+      ${text ? `<em>${text}</em>` : ''}
+    </div>
+  `;
+}
 function renderResultOverlay(state) {
   if (!smnResults) return '';
   if (smnResultType === 'unit') {
     return `
       <div class="smn-overlay" id="smnOverlay">
+        ${renderUnitSummonSummary()}
         <div class="smn-crystal-stage" id="smnStage"></div>
         <div class="smn-result-actions">
           <button class="smn-reveal-all-btn" id="smnToggleBtn" type="button">열기</button>
-          ${renderRepeatSummonButton(state, true)}
+          ${renderRepeatSummonButton(state)}
         </div>
       </div>
     `;
@@ -251,6 +286,7 @@ function renderResultOverlay(state) {
 
 function renderUnitSummonView(state) {
   const gems = state.resources.gems;
+  const adminFreeResources = Boolean(state.adminMode);
   const tickets = state.resources.specialTickets || 0;
 
   return `
@@ -266,8 +302,8 @@ function renderUnitSummonView(state) {
           </div>
           <div class="smn-banner-card__rates">${renderRatePills(NORMAL_WEIGHTS)}</div>
           <div class="smn-banner-card__btns">
-            ${renderSummonButton('1회', SUMMON_COST.normal_single, 'normal_1', gems)}
-            ${renderSummonButton('10회', SUMMON_COST.normal_multi, 'normal_10', gems)}
+            ${renderSummonButton('1회', SUMMON_COST.normal_single, 'normal_1', gems, adminFreeResources)}
+            ${renderSummonButton('10회', SUMMON_COST.normal_multi, 'normal_10', gems, adminFreeResources)}
           </div>
         </div>
 
@@ -281,8 +317,8 @@ function renderUnitSummonView(state) {
           </div>
           <div class="smn-banner-card__rates">${renderRatePills(RARE_WEIGHTS)}</div>
           <div class="smn-banner-card__btns">
-            ${renderSummonButton('1회', SUMMON_COST.rare_single, 'rare_1', gems)}
-            ${renderSummonButton('10회', SUMMON_COST.rare_multi, 'rare_10', gems)}
+            ${renderSummonButton('1회', SUMMON_COST.rare_single, 'rare_1', gems, adminFreeResources)}
+            ${renderSummonButton('10회', SUMMON_COST.rare_multi, 'rare_10', gems, adminFreeResources)}
           </div>
         </div>
       </div>
@@ -306,6 +342,7 @@ function renderUnitSummonView(state) {
 
 function renderEquipmentSummonView(state, equipment) {
   const gems = state.resources.gems;
+  const adminFreeResources = Boolean(state.adminMode);
   const inventory = [...(equipment.inventory || [])]
     .sort((a, b) => (b.rarityRank || 0) - (a.rarityRank || 0) || (b.power || 0) - (a.power || 0));
   const equippedIds = new Set(Object.values(equipment.equipped || {}).flatMap((slots) => Object.values(slots || {})));
@@ -323,8 +360,8 @@ function renderEquipmentSummonView(state, equipment) {
           </div>
           <div class="smn-banner-card__rates">${renderEquipmentRatePills()}</div>
           <div class="smn-banner-card__btns">
-            ${renderSummonButton('1회', EQUIPMENT_SUMMON_COST.single, 'equipment_1', gems)}
-            ${renderSummonButton('10회', EQUIPMENT_SUMMON_COST.multi, 'equipment_10', gems)}
+            ${renderSummonButton('1회', EQUIPMENT_SUMMON_COST.single, 'equipment_1', gems, adminFreeResources)}
+            ${renderSummonButton('10회', EQUIPMENT_SUMMON_COST.multi, 'equipment_10', gems, adminFreeResources)}
           </div>
         </div>
       </div>
@@ -374,33 +411,41 @@ export function bindSummonEvents(ctx) {
     }
 
     const action = btn.dataset.smn;
+    if (smnResults && smnResultType === 'unit' && action === smnRepeatAction) {
+      const unopened = refs.contentEntry.querySelectorAll('.smn-crystal:not(.is-broken)');
+      if (unopened.length) {
+        refs.contentEntry.querySelector('#smnToggleBtn')?.click();
+        btn.disabled = false;
+        return;
+      }
+    }
     let repeatAction = '';
     if (action === 'close') {
       smnResults = null;
       smnResultType = '';
       smnRepeatAction = '';
     } else if (action === 'normal_1') {
-      smnResults = await doUnitSummon(state, save, syncHud, 'normal', 1);
+      smnResults = doUnitSummon(state, save, syncHud, 'normal', 1);
       smnResultType = 'unit';
       repeatAction = action;
     } else if (action === 'normal_10') {
-      smnResults = await doUnitSummon(state, save, syncHud, 'normal', 10);
+      smnResults = doUnitSummon(state, save, syncHud, 'normal', 10);
       smnResultType = 'unit';
       repeatAction = action;
     } else if (action === 'rare_1') {
-      smnResults = await doUnitSummon(state, save, syncHud, 'rare', 1);
+      smnResults = doUnitSummon(state, save, syncHud, 'rare', 1);
       smnResultType = 'unit';
       repeatAction = action;
     } else if (action === 'rare_10') {
-      smnResults = await doUnitSummon(state, save, syncHud, 'rare', 10);
+      smnResults = doUnitSummon(state, save, syncHud, 'rare', 10);
       smnResultType = 'unit';
       repeatAction = action;
     } else if (action === 'equipment_1') {
-      smnResults = await doEquipmentSummon(state, save, syncHud, 1);
+      smnResults = doEquipmentSummon(state, save, syncHud, 1);
       smnResultType = 'equipment';
       repeatAction = action;
     } else if (action === 'equipment_10') {
-      smnResults = await doEquipmentSummon(state, save, syncHud, 10);
+      smnResults = doEquipmentSummon(state, save, syncHud, 10);
       smnResultType = 'equipment';
       repeatAction = action;
     }
@@ -481,11 +526,12 @@ function initCrystalStage(results, ctx) {
     crystal.innerHTML = `
       <div class="smn-crystal__break" style="--glow:${color.glow}">
         <div class="smn-crystal__shards"></div>
-        ${renderPortraitImg(ctx.state, result, 'smn-crystal__unit-img') || `<div class="smn-crystal__unit-text">${result.name}</div>`}
+        ${renderSummonUnitSprite(ctx.state, result, 'smn-crystal__unit-img') || `<div class="smn-crystal__unit-text">${result.name}</div>`}
         <div class="smn-crystal__info">
           <div class="smn-crystal__stars" style="color:${color.glow}">${renderStars(result.stars)}</div>
           <div class="smn-crystal__name">${result.name}</div>
-          ${result.isDup ? '<div class="smn-crystal__new">조각 +1</div>' : '<div class="smn-crystal__new">NEW</div>'}
+          ${renderSummonResultBadge(result)}
+          ${renderSummonPassiveInfo(result)}
         </div>
       </div>
     `;
@@ -502,13 +548,19 @@ function initCrystalStage(results, ctx) {
   const repeatBtn = document.getElementById('smnRepeatBtn');
   if (!btn) return;
 
-  let allOpen = false;
+    let allOpen = false;
   function syncOpenState() {
     allOpen = !stage.querySelector('.smn-crystal:not(.is-broken)');
-    if (!allOpen) return;
-    btn.textContent = '닫기';
-    if (repeatBtn) repeatBtn.hidden = false;
+    const repeatLabel = repeatBtn?.querySelector('span');
+    if (!allOpen) {
+      if (repeatLabel) repeatLabel.textContent = '결과 먼저 확인';
+      return;
+    }
+    btn.textContent = '확인';
+    if (repeatLabel) repeatLabel.textContent = '연속 소환';
   }
+
+  syncOpenState();
 
   btn.onclick = () => {
     if (!allOpen) {

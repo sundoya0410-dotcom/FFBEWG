@@ -1,17 +1,26 @@
 import { saveUserData } from './firebase.js';
 import {
   FULL_UNIT_LIBRARY,
+  GROUND_DATA,
   formatNumber,
   getEffectivePartyUnits,
+  getGroundRewardInfo,
+  getGroundStageState,
+  getGroundUnlockRequirement,
+  isGroundUnlocked,
   getPartyPower,
   getRarityStyle,
   getRoleComboSummary,
   getUnitVisualProfile,
   getVisualKey,
   applyVisualProfileToPromotionLine,
+  claimQuestReward,
+  formatQuestReward,
+  getQuestSummary,
   getUnitBattleRole,
   getUnitJobDisplayLabels,
   getUnitJobRoles,
+  getUnitCommonPassive,
   renderJobTooltipAttrs,
   renderRoleTooltipAttrs,
   VISUAL_LIMITS,
@@ -24,9 +33,11 @@ import {
   setUnitVisualProfileValue,
   toVisualControlValue,
   resolveUnitPortrait,
+  resolveUnitImageSprite,
   resolveUnitSprite,
 } from './assets.js';
 import { HomeBattleCore } from './battle-core.js';
+import { describeLimitBurst } from './limit-data.js';
 import { createContext } from './app-context.js';
 import { initAuth } from './auth.js';
 import {
@@ -54,6 +65,8 @@ let collectionSelectedKey = null;
 let visualCloudSaveTimer = null;
 let saveStatusTimer = null;
 let saveRunId = 0;
+let questBoardScrollTop = 0;
+let battleLogScrollTop = 0;
 
 const ADMIN_EMAIL = 'sundoya0410@gmail.com';
 const desktopQuery = window.matchMedia('(min-width: 900px)');
@@ -72,7 +85,7 @@ const NAV_LABELS = {
     pvp: { icon: '🏆', label: 'PVP' },
   },
   desktop: {
-    home: { icon: 'ⓘ', label: '정보' },
+    home: { icon: 'ⓘ', label: '메인' },
     units: { icon: '⇆', label: '배치' },
     collection: { icon: '◆', label: '도감' },
     growth: { icon: '⬆', label: '성장' },
@@ -94,6 +107,7 @@ const refs = {
   saveStatusText: document.querySelector('#saveStatusText'),
   adminMenuBtn: document.querySelector('#adminMenuBtn'),
   summonBadge: document.querySelector('.nav-item[data-screen="summon"] .nav-badge'),
+  homeBadge: document.querySelector('.nav-item[data-screen="home"] .nav-badge'),
   waveHint: document.querySelector('#waveHint'),
   synergyHint: document.querySelector('#synergyHint'),
   navItems: [...document.querySelectorAll('.nav-item')],
@@ -123,10 +137,8 @@ async function save(options = {}) {
   if (showStatus) setSaveStatus('saving', '저장중');
 
   if (!state._currentUid) {
-    const error = new Error('로그인 후 서버 저장이 가능합니다.');
-    if (showStatus) setSaveStatus('error', '로그인 필요');
-    if (!silent) alert(error.message);
-    return { local: true, cloud: false, error };
+    if (showStatus && runId === saveRunId) setSaveStatus('saved', '로컬 저장됨', true);
+    return { local: true, cloud: false, offline: true, savedAt: persisted._savedAt };
   }
 
   try {
@@ -212,6 +224,22 @@ function initJobTooltip() {
   });
 }
 
+
+function refreshInfoPanel() {
+  if (refs.contentEntry.hidden || lastPanelScreen !== 'quest') return;
+  const questBoard = refs.contentEntry.querySelector('.quest-board');
+  const battleLogList = refs.contentEntry.querySelector('.battle-log-list');
+  if (questBoard) questBoardScrollTop = questBoard.scrollTop;
+  if (battleLogList) battleLogScrollTop = battleLogList.scrollTop;
+
+  refs.contentEntry.innerHTML = renderInfoScreen();
+  bindInfoEvents();
+
+  const nextQuestBoard = refs.contentEntry.querySelector('.quest-board');
+  const nextBattleLogList = refs.contentEntry.querySelector('.battle-log-list');
+  if (nextQuestBoard) nextQuestBoard.scrollTop = questBoardScrollTop;
+  if (nextBattleLogList && battleLogScrollTop > 0) nextBattleLogList.scrollTop = battleLogScrollTop;
+}
 function mountBattle() {
   if (!battleCore || battleCore.destroyed) {
     battleCore = new HomeBattleCore({
@@ -219,12 +247,18 @@ function mountBattle() {
       onStateChange: () => {
         save({ silent: true, showStatus: false });
         syncHud();
+        refreshInfoPanel();
       },
     });
   }
 
   if (battleCore.root === refs.partyStage) return;
-  battleCore.mount(refs.partyStage);
+  try {
+    battleCore.mount(refs.partyStage);
+  } catch (error) {
+    console.error(error);
+    refs.partyStage.innerHTML = `<div class="battle-mount-error"><strong>Battle mount error</strong><span>${error?.message || error}</span></div>`;
+  }
 }
 
 function unmountBattle() {
@@ -362,7 +396,7 @@ function syncNavLabels(desktop) {
 }
 
 function syncHud() {
-  refs.rankValue.textContent = String(state.resources.rank);
+  if (refs.rankValue) refs.rankValue.textContent = String(state.resources.rank);
   refs.goldValue.textContent = formatNumber(state.resources.gold);
   refs.gemValue.textContent = formatNumber(state.resources.gems);
 
@@ -373,7 +407,16 @@ function syncHud() {
     refs.summonBadge.textContent = tickets;
     refs.summonBadge.hidden = tickets <= 0;
   }
-  if (refs.adminMenuBtn) {
+  const questClaimable = getQuestSummary(state).claimable.length;
+  if (!refs.homeBadge) {
+    refs.homeBadge = document.createElement('span');
+    refs.homeBadge.className = 'nav-badge';
+    document.querySelector('.nav-item[data-screen="home"]')?.appendChild(refs.homeBadge);
+  }
+  if (refs.homeBadge) {
+    refs.homeBadge.textContent = questClaimable;
+    refs.homeBadge.hidden = questClaimable <= 0;
+  }  if (refs.adminMenuBtn) {
     const adminAllowed = canUseAdminMode();
     refs.adminMenuBtn.hidden = !adminAllowed;
     refs.adminMenuBtn.classList.toggle('is-on', adminAllowed && state.adminMode);
@@ -397,6 +440,7 @@ function resetPanelState(screen) {
 }
 
 function bindSubScreen(screen) {
+  if (screen === 'quest') bindInfoEvents();
   if (screen === 'collection') bindCollectionEvents();
   if (screen === 'units') bindUnitsEvents(ctx);
   if (screen === 'growth') bindGrowthEvents(ctx);
@@ -405,7 +449,7 @@ function bindSubScreen(screen) {
 
 export function renderScreen() {
   const desktop = isDesktopLayout();
-  const panelScreen = desktop && state.currentScreen === 'home' ? 'info' : state.currentScreen;
+  const panelScreen = desktop && state.currentScreen === 'home' ? 'quest' : state.currentScreen;
   if (!canUseAdminMode()) state.adminMode = false;
 
   refs.app.dataset.layout = desktop ? 'desktop' : 'mobile';
@@ -454,7 +498,7 @@ export function renderScreen() {
 }
 
 function renderSubScreen(screen) {
-  if (screen === 'info') return renderInfoScreen();
+  if (screen === 'quest') return renderInfoScreen();
   if (screen === 'collection') return renderCollectionScreen();
   if (screen === 'units') return renderUnitsScreen(ctx);
   if (screen === 'growth') return renderGrowthScreen(ctx);
@@ -700,7 +744,7 @@ function renderCollectionPortrait(unit) {
 }
 
 function renderCollectionIdlePreview(unit) {
-  const sources = resolveUnitSprite(unit, 'idle').filter(Boolean);
+  const sources = resolveUnitImageSprite(unit, 'idle').filter(Boolean);
   const src = sources[0] || '';
   const fallback = sources[1] || '';
   if (!src) return '<div class="collection-detail__sprite-empty">NO IDLE</div>';
@@ -742,6 +786,23 @@ function renderCollectionCard(libraryUnit, ownedUnit, isSelected = false) {
   `;
 }
 
+function renderCollectionAbilityPanel(unit) {
+  const passive = getUnitCommonPassive(unit);
+  const limit = describeLimitBurst(unit);
+  return `
+      <div class="collection-detail__ability-grid">
+        <div class="collection-detail__ability collection-detail__ability--passive">
+          <span>고유 패시브</span>
+          <strong>${passive ? passive.label : '없음'}</strong>
+          <p>${passive ? passive.text : '이 유닛은 아직 고유 패시브가 없습니다.'}</p>
+        </div>
+        <div class="collection-detail__ability collection-detail__ability--limit">
+          <span>리미트기</span>
+          <strong>${limit.name}</strong>
+          <p>${limit.text}</p>
+        </div>
+      </div>`;
+}
 function renderCollectionDetail(libraryUnit, ownedUnit) {
   if (!libraryUnit) {
     return `
@@ -796,6 +857,8 @@ function renderCollectionDetail(libraryUnit, ownedUnit) {
           <div class="collection-detail__stage-shadow"></div>
         </div>
       </div>
+
+      ${renderCollectionAbilityPanel(displayUnit)}
 
       <div class="collection-detail__owned collection-detail__owned--${isOwned ? 'yes' : 'no'}">
         <span>${isOwned ? '보유 중' : '미보유'}</span>
@@ -974,32 +1037,149 @@ function renderInfoComboChip(rule, party) {
   `;
 }
 
-function renderInfoScreen() {
-  const party = getEffectivePartyUnits(state);
-  const roleCombo = getRoleComboSummary(state);
-  const comboChips = (roleCombo.active || []).length
-    ? roleCombo.active.map((rule) => renderInfoComboChip(rule, party)).join('')
-    : '<span class="info-combo-empty">발동 중인 시너지 없음</span>';
+function renderAdventureStageCards() {
+  return Object.entries(GROUND_DATA).map(([groundId, ground]) => {
+    const stage = getGroundStageState(state, groundId);
+    const active = state.home.groundId === groundId;
+    const progress = Math.round(stage.progress * 100);
+    const unlocked = isGroundUnlocked(state, groundId);
+    const req = getGroundUnlockRequirement(state, groundId);
+    const requirementText = req ? `${req.label} 클리어 필요` : '선행 스테이지 필요';
+    return `
+      <button class="info-stage-card${active ? ' is-active' : ''}${stage.cleared ? ' is-cleared' : ''}${unlocked ? '' : ' is-locked'}" data-info-ground="${groundId}" ${unlocked ? '' : 'disabled'} type="button">
+        <span>${ground.chapter || 'STAGE'}</span>
+        <strong>${ground.label}</strong>
+        <em>${unlocked ? (stage.cleared ? 'CLEAR' : `W${stage.bestWave}/${stage.targetWave}`) : 'LOCKED'}</em>
+        ${unlocked ? `<i style="width:${progress}%"></i>` : `<small>${requirementText}</small>`}
+      </button>
+    `;
+  }).join('');
+}
+function bindInfoEvents() {
+  const questBoard = refs.contentEntry.querySelector('.quest-board');
+  const battleLogList = refs.contentEntry.querySelector('.battle-log-list');
+  if (questBoard && !questBoard.dataset.scrollKeeper) {
+    questBoard.dataset.scrollKeeper = '1';
+    questBoard.addEventListener('scroll', () => { questBoardScrollTop = questBoard.scrollTop; }, { passive: true });
+    questBoard.scrollTop = questBoardScrollTop;
+  }
+  if (battleLogList && !battleLogList.dataset.scrollKeeper) {
+    battleLogList.dataset.scrollKeeper = '1';
+    battleLogList.addEventListener('scroll', () => { battleLogScrollTop = battleLogList.scrollTop; }, { passive: true });
+    if (battleLogScrollTop > 0) battleLogList.scrollTop = battleLogScrollTop;
+  }
 
+  refs.contentEntry.querySelectorAll('[data-quest-claim]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const questId = button.dataset.questClaim;
+      const result = claimQuestReward(state, questId);
+      if (!result.ok) return;
+      await save({ silent: true, showStatus: true });
+      syncHud();
+      refs.contentEntry.innerHTML = renderInfoScreen();
+      bindInfoEvents();
+    });
+  });
+  refs.contentEntry.querySelectorAll('[data-info-ground]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const groundId = button.dataset.infoGround;
+      if (!GROUND_DATA[groundId] || !isGroundUnlocked(state, groundId)) return;
+      if (!state.home.stageBestWaves || typeof state.home.stageBestWaves !== 'object') state.home.stageBestWaves = {};
+      state.home.groundId = groundId;
+      state.home.wave = Math.max(1, Number(state.home.stageBestWaves[groundId]) || 1);
+      state.home.winsToBoss = Math.max(1, 5 - (state.home.wave % 5 || 5));
+      refreshBattle();
+      save({ silent: true, showStatus: true });
+      renderScreen();
+    });
+  });
+}
+const QUEST_GROUP_LABELS = {
+  story: '스토리',
+  daily: '일일',
+  achievement: '업적',
+};
+
+function renderQuestCard(quest) {
+  const percent = Math.round(quest.progress * 100);
+  const rewardText = formatQuestReward(quest.reward);
+  const statusLabel = quest.claimed ? '수령 완료' : quest.claimable ? '보상 받기' : `${formatNumber(Math.min(quest.current, quest.target))}/${formatNumber(quest.target)}`;
   return `
-    <section class="info-screen">
-      <div class="info-head">
-        <div>
-          <h2>파티 정보</h2>
-        </div>
-        <div class="info-power">
-          <span>전투력</span>
-          <strong>${formatNumber(getPartyPower(state))}</strong>
-        </div>
+    <div class="quest-card quest-card--${quest.group}${quest.claimable ? ' is-claimable' : ''}${quest.claimed ? ' is-claimed' : ''}">
+      <div class="quest-card__main">
+        <span>${QUEST_GROUP_LABELS[quest.group] || quest.group}</span>
+        <strong>${quest.title}</strong>
+        <p>${quest.description}</p>
+        <div class="quest-progress"><i style="width:${percent}%"></i></div>
       </div>
+      <div class="quest-card__side">
+        <em>${rewardText}</em>
+        <button class="quest-claim-btn" data-quest-claim="${quest.id}" ${quest.claimable ? '' : 'disabled'} type="button">${statusLabel}</button>
+      </div>
+    </div>
+  `;
+}
 
-      <div class="info-summary-grid">
-        <div class="info-summary info-summary--combo info-summary--${roleCombo.tone}">
-          <span>시너지</span>
-          <strong>${roleCombo.bonus > 0 ? `총 +${roleCombo.bonus}% / 스탯 +${roleCombo.statBonus}%` : roleCombo.label}</strong>
-          <div class="info-combo-list">${comboChips}</div>
+function renderQuestBoard() {
+  const summary = getQuestSummary(state);
+  return `
+    <div class="quest-board">
+      <div class="quest-board__head">
+        <div>
+          <span class="info-eyebrow">QUEST</span>
+          <strong>퀘스트</strong>
         </div>
+        <em>${summary.claimable.length ? `수령 가능 ${summary.claimable.length}` : '진행중'}</em>
       </div>
+      ${['story', 'daily', 'achievement'].map((group) => `
+        <div class="quest-group">
+          <div class="quest-group__title">${QUEST_GROUP_LABELS[group]}</div>
+          ${summary.byGroup[group].map(renderQuestCard).join('')}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderBattleLogPanel() {
+  const logs = Array.isArray(state.home?.battleLogs) ? state.home.battleLogs : [];
+  return `
+    <div class="battle-log-panel">
+      <div class="battle-log-panel__head">
+        <div>
+          <span class="info-eyebrow">BATTLE LOG</span>
+          <strong>전투 로그</strong>
+        </div>
+        <em>${logs.length ? `최근 ${Math.min(logs.length, 80)}개` : '대기중'}</em>
+      </div>
+      <div class="battle-log-list">
+        ${logs.length ? logs.map((log) => `
+          <div class="battle-log-entry battle-log-entry--${log.type || 'info'}">
+            <div class="battle-log-entry__main">
+              <strong>${log.title || '전투 기록'}</strong>
+              <p>${log.message || ''}</p>
+            </div>
+            <div class="battle-log-rewards">
+              ${(log.rewards || []).map((reward) => `
+                <span>${reward.label} <strong>${reward.icon || ''}${formatNumber(reward.amount)}</strong></span>
+              `).join('')}
+            </div>
+          </div>
+        `).join('') : `
+          <div class="battle-log-empty">
+            <strong>아직 기록 없음</strong>
+            <p>보스 처치와 첫 클리어 보상이 여기에 표시됩니다.</p>
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+}
+function renderInfoScreen() {
+  return `
+    <section class="info-screen info-screen--quest">
+      ${renderBattleLogPanel()}
+      ${renderQuestBoard()}
     </section>
   `;
 }
@@ -1189,6 +1369,8 @@ function renderPvpScreen() {
 refs.navItems.forEach((button) => {
   button.addEventListener('click', () => {
     state.currentScreen = button.dataset.screen;
+    if (state.currentScreen === 'home') lastPanelScreen = null;
+    saveAppState(state);
     renderScreen();
   });
 });
@@ -1208,4 +1390,5 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') save({ silent: true, showStatus: false });
 });
 
+renderScreen();
 initAuth({ state, renderScreen });

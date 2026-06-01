@@ -1,12 +1,4 @@
-// ============================================================
-// Firebase 초기화 & Auth/Firestore 헬퍼
-// ============================================================
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
-  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc }
-  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-
+// Firebase wrapper with offline-safe dynamic loading.
 const firebaseConfig = {
   apiKey: "AIzaSyD3fj56SzHo_E1B_9o7Ly6Zsc908SqXWD0",
   authDomain: "ffbewg.firebaseapp.com",
@@ -16,17 +8,32 @@ const firebaseConfig = {
   appId: "1:50576678844:web:992fa122a49339a3fc95b9",
 };
 
-const app  = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db   = getFirestore(app);
+let firebasePromise = null;
+let offlineMode = false;
+
+async function loadFirebase() {
+  if (firebasePromise) return firebasePromise;
+  firebasePromise = (async () => {
+    const [{ initializeApp }, authMod, storeMod] = await Promise.all([
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js'),
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js'),
+    ]);
+    const app = initializeApp(firebaseConfig);
+    const auth = authMod.getAuth(app);
+    const db = storeMod.getFirestore(app);
+    return { authMod, storeMod, auth, db };
+  })().catch((error) => {
+    offlineMode = true;
+    console.warn('[FFBEWG] Firebase unavailable, using local offline mode:', error);
+    throw error;
+  });
+  return firebasePromise;
+}
 
 function cleanForFirestore(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => cleanForFirestore(item)).filter((item) => item !== undefined);
-  }
-  if (!value || typeof value !== 'object') {
-    return value === undefined ? undefined : value;
-  }
+  if (Array.isArray(value)) return value.map((item) => cleanForFirestore(item)).filter((item) => item !== undefined);
+  if (!value || typeof value !== 'object') return value === undefined ? undefined : value;
   return Object.entries(value).reduce((acc, [key, item]) => {
     if (item === undefined || typeof item === 'function') return acc;
     const cleaned = cleanForFirestore(item);
@@ -35,38 +42,48 @@ function cleanForFirestore(value) {
   }, {});
 }
 
-// 구글 로그인
 export async function loginWithGoogle(emailHint = '', forceSelect = false) {
-  const provider = new GoogleAuthProvider();
+  const { authMod, auth } = await loadFirebase();
+  const provider = new authMod.GoogleAuthProvider();
   const params = {};
-  if (emailHint) {
-    params.login_hint = emailHint;
-  }
+  if (emailHint) params.login_hint = emailHint;
   if (forceSelect) params.prompt = 'select_account';
   if (Object.keys(params).length) provider.setCustomParameters(params);
-  const result = await signInWithPopup(auth, provider);
+  const result = await authMod.signInWithPopup(auth, provider);
   return result.user;
 }
 
-// 로그아웃
 export async function logout() {
-  await signOut(auth);
+  try {
+    const { authMod, auth } = await loadFirebase();
+    await authMod.signOut(auth);
+  } catch (_) {
+    offlineMode = true;
+  }
 }
 
-// 유저 상태 감지
 export function onUserChange(callback) {
-  return onAuthStateChanged(auth, callback);
+  loadFirebase()
+    .then(({ authMod, auth }) => authMod.onAuthStateChanged(auth, callback))
+    .catch(() => {
+      offlineMode = true;
+      window.setTimeout(() => callback({ uid: 'offline-local', email: '', providerData: [] }), 0);
+    });
+  return () => {};
 }
 
-// Firestore에서 유저 데이터 불러오기
 export async function loadUserData(uid) {
-  const ref  = doc(db, 'users', uid);
-  const snap = await getDoc(ref);
+  if (offlineMode || uid === 'offline-local') return null;
+  const { storeMod, db } = await loadFirebase();
+  const ref = storeMod.doc(db, 'users', uid);
+  const snap = await storeMod.getDoc(ref);
   return snap.exists() ? snap.data() : null;
 }
 
-// Firestore에 유저 데이터 저장
 export async function saveUserData(uid, data) {
-  const ref = doc(db, 'users', uid);
-  await setDoc(ref, cleanForFirestore(data));
+  if (offlineMode || uid === 'offline-local') return false;
+  const { storeMod, db } = await loadFirebase();
+  const ref = storeMod.doc(db, 'users', uid);
+  await storeMod.setDoc(ref, cleanForFirestore(data));
+  return true;
 }
